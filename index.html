@@ -1,0 +1,235 @@
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<script>
+/* ================= CONFIG ================= */
+const SUPABASE_URL = 'https://aojxwpgbovurcsdaqclk.supabase.co/rest/v1/';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFvanh3cGdib3Z1cmNzZGFxY2xrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY3ODU0OTMsImV4cCI6MjA5MjM2MTQ5M30.HnSFaSoyrXI3w78cIV7N7Z8RjOvl0l8HAaZt94repYY';
+
+
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/* ================= GLOBAL ================= */
+let ITEMS = [];
+let MIN = 200;
+let role = 'admin';
+
+/* ================= INIT ================= */
+document.addEventListener('DOMContentLoaded', initApp);
+
+async function initApp() {
+  try {
+    buildNav();
+    updateCountdown();
+    setInterval(updateCountdown,30000);
+
+    await loadItems();
+    await loadOrders();
+
+  } catch (e) {
+    console.error(e);
+    document.body.innerHTML = '<h2 style="padding:20px">Greška u aplikaciji — otvori F12</h2>';
+  }
+}
+
+/* ================= LOAD ITEMS ================= */
+async function loadItems() {
+  const { data, error } = await supabase.from('items').select('*');
+
+  if (error) {
+    console.error(error);
+    showToast('Greška artikli', true);
+    return;
+  }
+
+  ITEMS = data || [];
+  renderItems();
+}
+
+/* ================= RENDER ITEMS ================= */
+function renderItems() {
+  const container = document.querySelector('#p-order .card');
+  if (!container) return;
+
+  let html = `
+    <div class="item-hdr">
+      <span>Artikl</span>
+      <span style="text-align:center">Količina</span>
+      <span style="text-align:center">Maks.</span>
+      <span>Napomena</span>
+    </div>
+  `;
+
+  ITEMS.forEach(item => {
+    html += `
+    <div class="item-row">
+      <div>
+        <div class="item-name">${item.name}</div>
+        <div class="item-unit">${item.unit} · ${item.price} €/kom</div>
+      </div>
+      <input class="qty-input" data-id="${item.id}" type="number" min="0" max="${item.max_qty}" oninput="calcIznos()">
+      <div class="max-lbl">${item.max_qty}</div>
+      <input class="nap-input" type="text">
+    </div>`;
+  });
+
+  html += `
+    <div class="submit-row">
+      <button class="btn-primary" onclick="submitOrder()">Pohrani narudžbu</button>
+    </div>
+  `;
+
+  container.innerHTML = html;
+}
+
+/* ================= CALC ================= */
+function calcIznos() {
+  let total = 0;
+
+  document.querySelectorAll('.qty-input').forEach(inp => {
+    const id = inp.dataset.id;
+    const item = ITEMS.find(i => i.id === id);
+    const qty = parseInt(inp.value) || 0;
+
+    if (!item) return;
+
+    if (qty > item.max_qty) inp.classList.add('over-max');
+    else inp.classList.remove('over-max');
+
+    total += qty * item.price;
+  });
+
+  const el = document.getElementById('iznos-total');
+  if (el) el.textContent = total.toFixed(2).replace('.', ',') + ' €';
+}
+
+/* ================= SUBMIT ================= */
+async function submitOrder() {
+  let total = 0;
+  let itemsToInsert = [];
+
+  document.querySelectorAll('.qty-input').forEach(inp => {
+    const id = inp.dataset.id;
+    const item = ITEMS.find(i => i.id === id);
+    const qty = parseInt(inp.value) || 0;
+
+    if (!item || qty <= 0) return;
+
+    total += qty * item.price;
+
+    itemsToInsert.push({
+      item_name: item.name,
+      qty: qty,
+      price: item.price
+    });
+  });
+
+  if (itemsToInsert.length === 0) {
+    showToast('Nema stavki', true);
+    return;
+  }
+
+  const { data: order, error } = await supabase
+    .from('orders')
+    .insert({
+      store_name: 'Centar Zagreb',
+      total: total
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error(error);
+    showToast('Greška spremanje', true);
+    return;
+  }
+
+  itemsToInsert = itemsToInsert.map(i => ({
+    ...i,
+    order_id: order.id
+  }));
+
+  await supabase.from('order_items').insert(itemsToInsert);
+
+  showToast('Narudžba spremljena!');
+  loadOrders();
+}
+
+/* ================= LOAD ORDERS ================= */
+async function loadOrders() {
+  const { data, error } = await supabase
+    .from('orders')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error(error);
+    return;
+  }
+
+  renderOrders(data || []);
+}
+
+/* ================= RENDER ORDERS ================= */
+async function renderOrders(orders) {
+  const tbody = document.querySelector('#p-narudzbe tbody');
+  if (!tbody) return;
+
+  let html = '';
+
+  for (const order of orders) {
+    const { data: items } = await supabase
+      .from('order_items')
+      .select('*')
+      .eq('order_id', order.id);
+
+    (items || []).forEach(item => {
+      html += `
+      <tr>
+        <td>${order.store_name}</td>
+        <td>—</td>
+        <td>${item.item_name}</td>
+        <td>${item.qty}</td>
+        <td>—</td>
+        <td>kom</td>
+        <td>—</td>
+      </tr>`;
+    });
+  }
+
+  tbody.innerHTML = html;
+}
+
+/* ================= UI ================= */
+function buildNav(){
+  const el=document.getElementById('nav-items');
+
+  el.innerHTML=`<div class="nav-item" onclick="showPage('dashboard',this)">Dashboard</div>
+  <div class="nav-item" onclick="showPage('narudzbe',this)">Narudžbe</div>
+  <div class="nav-item" onclick="showPage('order',this)">Nova narudžba</div>`;
+
+  showPage('order');
+}
+
+function showPage(p){
+  document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));
+  const pg=document.getElementById('p-'+p);
+  if(pg)pg.classList.add('active');
+}
+
+function showToast(msg,err){
+  const t=document.getElementById('toast');
+  t.textContent=msg;
+  t.className='toast'+(err?' err':'');
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),2500);
+}
+
+function updateCountdown(){
+  const diff=new Date('2026-04-15T23:59:00')-new Date();
+  if(diff>0){
+    const d=Math.floor(diff/864e5);
+    const cd=document.getElementById('cd-d');
+    if(cd)cd.textContent=d;
+  }
+}
+</script>
