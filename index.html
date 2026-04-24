@@ -168,6 +168,17 @@ tr:hover td{background:var(--jbgl)}
 .period-chip{background:var(--jy);color:var(--jb);padding:3px 10px;border-radius:20px;font-size:10px;font-weight:700}
 
 
+
+
+.filter-btn{padding:8px 16px;background:white;border:1.5px solid var(--jbr)!important;color:var(--jm);font-size:11px;border-radius:4px}
+.filter-btn:hover{background:var(--jbg);color:var(--jb)}
+.filter-btn.active{background:var(--jb)!important;color:white!important;border-color:var(--jb)!important}
+.state-metrics{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:10px 0}
+.state-metric{display:flex;justify-content:space-between;font-size:11px;padding:4px 0;border-bottom:1px solid var(--jbr)}
+.state-metric:last-child{border-bottom:none}
+.state-metric-label{color:var(--jm)}
+.state-metric-value{font-weight:700;color:var(--jt)}
+
 /* ── ORDER TABLE ── */
 .order-table{width:100%;border-collapse:collapse;font-size:12px}
 .order-table thead{background:var(--jbg)}
@@ -198,6 +209,12 @@ tr:hover td{background:var(--jbgl)}
 }
 
 /* ── MOBILE RESPONSIVE ── */
+
+@media (max-width: 768px) {
+  .card{overflow-x:auto}
+  .order-table{min-width:600px}
+  table{min-width:500px}
+}
 @media (max-width: 768px) {
   .main-wrap{flex-direction:column}
   .sidebar{width:100%;border-right:none;border-bottom:1px solid var(--jbr);padding:8px 0;display:flex;overflow-x:auto;gap:2px;flex-shrink:0}
@@ -313,20 +330,15 @@ tr:hover td{background:var(--jbgl)}
             <div class="page-sub">Sve narudžbe aktivnog perioda</div>
           </div>
         </div>
-        <div class="filter-row">
-          <select class="filter-select" id="filterDrzava" onchange="loadAdminNarudzbe()">
-            <option value="">Sve države</option>
-            <option value="HR">Hrvatska (HR)</option>
-            <option value="BA">Bosna i Hercegovina (BA)</option>
-            <option value="SI">Slovenija (SI)</option>
-            <option value="RS">Srbija (RS)</option>
-          </select>
-          <select class="filter-select" id="filterStatus" onchange="loadAdminNarudzbe()">
-            <option value="">Svi statusi</option>
-            <option value="predano">Predano</option>
-            <option value="nacrt">Nacrt</option>
-          </select>
-          <input class="search-input" placeholder="Pretraži poslovnicu..." id="searchNarudzbe" oninput="loadAdminNarudzbe()">
+        <div class="filter-row" style="gap:4px">
+          <button class="btn filter-btn active" onclick="setDrzavaFilter('', this)">Sve</button>
+          <button class="btn filter-btn" onclick="setDrzavaFilter('HR', this)">HR</button>
+          <button class="btn filter-btn" onclick="setDrzavaFilter('BA', this)">BA</button>
+          <button class="btn filter-btn" onclick="setDrzavaFilter('SI', this)">SI</button>
+          <button class="btn filter-btn" onclick="setDrzavaFilter('RS', this)">RS</button>
+          <input type="hidden" id="filterDrzava" value="">
+          <input type="hidden" id="filterStatus" value="">
+          <input type="hidden" id="searchNarudzbe" value="">
         </div>
         <div class="card">
           <div id="narudzbeTable"><div class="loading">Učitavanje...</div></div>
@@ -640,7 +652,8 @@ let editingTrgovinaId = null;
 let countdownInterval = null;
 let storeOrderId = null;
 let storeOrderItems = {};   // artikl_id -> kolicina
-let storeExtraItems = [];   // [{naziv, cijena}]
+let storeExtraItems = [];
+let sortField = 'sifra'; let sortDir = 'asc';   // [{naziv, cijena}]
 
 // ═══════════════════════════════════════════════════════
 // UTILS
@@ -803,95 +816,71 @@ function showPage(id) {
 // ═══════════════════════════════════════════════════════
 async function loadAdminDashboard() {
   if (!activePeriod) {
-    $('dashMetrics').innerHTML = '<div class="alert alert-warning">⚠️ Nema aktivnog perioda. Kreirajte novi period u sekciji Period.</div>';
+    $('dashMetrics').innerHTML = '<div class="alert alert-warning">Nema aktivnog perioda. Kreirajte novi period.</div>';
+    $('dashStateCards').innerHTML = '';
     return;
   }
 
   $('dashPeriodChip').innerHTML = `<span class="period-chip">📅 ${escHtml(activePeriod.mjesec)}</span>`;
 
-  // Dohvati sve narudžbe za aktivan period
   const { data: narudzbe } = await sb
     .from('narudzbe')
-    .select('*, trgovine(naziv, drzava, minimalni_iznos)')
+    .select('*, trgovine(naziv, drzava, minimalni_iznos, email, kontakt_osoba)')
     .eq('period_mjesec', activePeriod.mjesec)
     .eq('period_godina', activePeriod.godina);
 
   const { data: sveTrgovine } = await sb.from('trgovine').select('id,naziv,drzava,aktivan').eq('aktivan', true);
 
-  // Metrici
   const total = narudzbe?.length || 0;
   const predano = narudzbe?.filter(n => n.status === 'predano').length || 0;
-  const totalAmt = narudzbe?.reduce((s,n) => s + (n.ukupni_iznos||0), 0) || 0;
   const aktivnih = sveTrgovine?.filter(t => t.aktivan).length || 0;
 
   $('dashMetrics').innerHTML = `
-    <div class="metric">
-      <div class="metric-label">Ukupno narudžbi</div>
-      <div class="metric-value">${total}</div>
-      <div class="metric-sub">od ${aktivnih} poslovnica</div>
-    </div>
-    <div class="metric">
-      <div class="metric-label">Predano</div>
-      <div class="metric-value">${predano}</div>
-      <div class="metric-sub">${total - predano} u nacrtu</div>
-    </div>
-    <div class="metric">
-      <div class="metric-label">Deadline</div>
-      <div class="metric-value" style="font-size:15px">${fmtDate(activePeriod.deadline_datum)}</div>
-      <div class="metric-sub">${activePeriod.deadline_vrijeme?.substring(0,5)}</div>
-    </div>
-    <div class="metric">
-      <div class="metric-label">Aktivnih poslovnica</div>
-      <div class="metric-value">${aktivnih}</div>
-      <div class="metric-sub">4 države</div>
-    </div>`;
+    <div class="metric"><div class="metric-label">Ukupno narudžbi</div><div class="metric-value">${total}</div><div class="metric-sub">od ${aktivnih} poslovnica</div></div>
+    <div class="metric"><div class="metric-label">Predano</div><div class="metric-value">${predano}</div><div class="metric-sub">${total - predano} u nacrtu</div></div>
+    <div class="metric"><div class="metric-label">Deadline</div><div class="metric-value" style="font-size:15px">${fmtDate(activePeriod.deadline_datum)}</div><div class="metric-sub">${activePeriod.deadline_vrijeme?.substring(0,5)}</div></div>
+    <div class="metric"><div class="metric-label">Aktivnih poslovnica</div><div class="metric-value">${aktivnih}</div></div>`;
 
-  // Kartice po državama
   const drzave = ['HR','BA','SI','RS'];
   const drzaveNazivi = {HR:'Hrvatska',BA:'Bosna i Hercegovina',SI:'Slovenija',RS:'Srbija'};
+  const valuta = {HR:'EUR',BA:'KM',SI:'EUR',RS:'RSD'};
   let cardsHtml = '';
 
   for (const drzava of drzave) {
     const dNar = narudzbe?.filter(n => n.trgovine?.drzava === drzava) || [];
-    const dPred = dNar.filter(n => n.status === 'predano').length;
-    const dUkupno = dNar.reduce((s,n) => s + (n.ukupni_iznos||0), 0);
+    const dPred = dNar.filter(n => n.status === 'predano');
+    const dUkupno = dNar.reduce((s,n) => s + (parseFloat(n.ukupni_iznos)||0), 0);
     const dTrg = sveTrgovine?.filter(t => t.drzava === drzava).length || 0;
+    const cur = valuta[drzava] || '';
 
     cardsHtml += `
       <div class="state-card">
-        <div class="state-card-name">
-          ${drzaveNazivi[drzava]}
-          ${getBadgeDrzava(drzava)}
+        <div class="state-card-name">${drzaveNazivi[drzava]} ${getBadgeDrzava(drzava)}</div>
+        <div class="state-metrics">
+          <div class="state-metric"><span class="state-metric-label">Poslovnica</span><span class="state-metric-value">${dTrg}</span></div>
+          <div class="state-metric"><span class="state-metric-label">Narudžbi</span><span class="state-metric-value">${dNar.length} / ${dTrg}</span></div>
+          <div class="state-metric"><span class="state-metric-label">Predano</span><span class="state-metric-value">${dPred.length}</span></div>
+          <div class="state-metric"><span class="state-metric-label">Ukupno</span><span class="state-metric-value">${dUkupno.toFixed(2)} ${cur}</span></div>
         </div>
-        <div class="state-stat">Narudžbe: <strong>${dNar.length} / ${dTrg}</strong></div>
-        <div class="state-stat">Predano: <strong>${dPred}</strong></div>
-        <button class="dl-btn" onclick="exportExcel('${drzava}')" id="dlBtn${drzava}">
-          ⬇ Preuzmi Excel ${drzava}
-        </button>
+        <button class="dl-btn" onclick="exportExcel('${drzava}')" id="dlBtn${drzava}">⬇ Preuzmi Excel ${drzava}</button>
       </div>`;
   }
   $('dashStateCards').innerHTML = cardsHtml;
 
   // Posljednje narudžbe
-  const recent = (narudzbe || []).sort((a,b) => new Date(b.updated_at) - new Date(a.updated_at)).slice(0,8);
+  const recent = (narudzbe || []).sort((a,b) => new Date(b.updated_at) - new Date(a.updated_at)).slice(0,10);
   if (!recent.length) {
     $('dashRecentOrders').innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div>Nema narudžbi za ovaj period.</div>';
     return;
   }
-
-  let html = `<table><thead><tr>
-    <th>Poslovnica</th><th>Država</th><th>Iznos</th><th>Status</th><th>Datum</th>
-  </tr></thead><tbody>`;
+  let html = `<table><thead><tr><th>Poslovnica</th><th>Država</th><th>Iznos</th><th>Status</th><th>Datum</th></tr></thead><tbody>`;
   for (const n of recent) {
-    const cijene = {HR:'EUR',BA:'KM',SI:'EUR',RS:'RSD'};
-    const cur = cijene[n.trgovine?.drzava] || '';
+    const cur = valuta[n.trgovine?.drzava] || '';
     html += `<tr>
       <td class="fw-bold">${escHtml(n.trgovine?.naziv||'—')}</td>
       <td>${getBadgeDrzava(n.trgovine?.drzava||'')}</td>
       <td class="fw-bold">${parseFloat(n.ukupni_iznos||0).toFixed(2)} ${cur}</td>
-      <td>${n.status === 'predano'
-        ? '<span class="badge badge-ok">✓ Predano</span>'
-        : '<span class="badge badge-draft">Nacrt</span>'}</td>
+      <td>${n.status === 'predano' ? '<span class="badge badge-ok">✓ Predano</span>' : '<span class="badge badge-draft">Nacrt</span>'}</td>
       <td class="text-muted">${fmtDate(n.updated_at)}</td>
     </tr>`;
   }
@@ -1400,12 +1389,13 @@ async function loadPeriod() {
           <div>
             <div style="font-size:16px;font-weight:700;color:var(--jb)">${escHtml(p.mjesec)}</div>
             <div class="text-muted" style="font-size:11px">Deadline: ${fmtDate(p.deadline_datum)} u ${p.deadline_vrijeme?.substring(0,5)}</div>
+            <div class="text-muted" style="font-size:11px">Podsjetnik: ${p.podsjetnik_dana} dana prije</div>
           </div>
-          ${isActive
-            ? '<span class="badge badge-ok" style="font-size:11px;padding:4px 10px">● AKTIVAN</span>'
-            : '<span class="badge" style="background:var(--jbg);color:var(--jm);font-size:11px;padding:4px 10px">Zatvoren</span>'}
+          <div class="d-flex gap-8 align-center">
+            ${isActive ? '<span class="badge badge-ok" style="font-size:11px;padding:4px 10px">● AKTIVAN</span>' : '<span class="badge" style="background:var(--jbg);color:var(--jm);font-size:11px;padding:4px 10px">Zatvoren</span>'}
+            ${isActive ? `<button class="btn btn-secondary btn-sm" onclick="editPeriodDeadline(${p.id}, '${p.deadline_datum}', '${p.deadline_vrijeme}')">✏️ Uredi deadline</button>` : ''}
+          </div>
         </div>
-        <div class="text-muted" style="font-size:11px">Podsjetnik: ${p.podsjetnik_dana} dana prije deadlinea</div>
       </div>`;
   }
   $('periodContent').innerHTML = html;
@@ -1825,11 +1815,14 @@ function renderOrderForm(narudzba, artikli) {
       <div id="extraItemsWrap">
         <table class="order-table" id="extraTable">
           <thead><tr>
-            <th>Naziv artikla</th>
-            <th style="width:90px;text-align:center">Cijena (${cur})</th>
-            <th style="width:90px;text-align:center">Količina</th>
-            <th style="width:100px;text-align:right">Ukupno (${cur})</th>
-            <th style="width:36px"></th>
+            <th style="width:70px">Šifra</th>
+            <th style="width:30%">Naziv</th>
+            <th style="width:12%">Pakiranje</th>
+            <th style="width:80px;text-align:center">Cijena</th>
+            <th style="width:70px;text-align:center">Kol.</th>
+            <th style="width:60px;text-align:center">Max</th>
+            <th style="width:90px;text-align:right">Ukupno (${cur})</th>
+            <th style="width:30px"></th>
           </tr></thead>
           <tbody id="extraItemsList"></tbody>
         </table>
@@ -1868,7 +1861,7 @@ function renderOrderForm(narudzba, artikli) {
 }
 
 async function updateItem(artiklId, value, cijena, maxKolicina) {
-  const kol = parseInt(value) || 0;
+  const kol = Math.max(0, parseInt(value) || 0);
 
   if (kol > maxKolicina) {
     alert(`Maksimalna dozvoljena količina za ovaj artikl je ${maxKolicina}!`);
@@ -1893,18 +1886,18 @@ async function updateItem(artiklId, value, cijena, maxKolicina) {
 function calcTotal() {
   let total = 0;
   for (const item of Object.values(storeOrderItems)) {
-    total += (item.kolicina || 0) * (item.cijena || 0);
+    total += Math.max(0, item.kolicina || 0) * Math.max(0, item.cijena || 0);
   }
   const extraList = $('extraItemsList');
   if (extraList) {
     extraList.querySelectorAll('tr.extra-row').forEach(row => {
       const nums = row.querySelectorAll('input[type="number"]');
-      const cij = parseFloat(nums[0]?.value || 0);
-      const kol = parseInt(nums[1]?.value || 0);
+      const cij = Math.max(0, parseFloat(nums[0]?.value || 0));
+      const kol = Math.max(0, parseInt(nums[1]?.value || 0));
       total += cij * kol;
     });
   }
-  return total;
+  return Math.max(0, total);
 }
 
 function updateTotalBar() {
@@ -1932,7 +1925,6 @@ function addExtraItem() {
 function addExtraItemToDOM(data) {
   const list = $('extraItemsList');
   if (!list) return;
-  const idx = list.children.length;
   const n = escHtml(data.naziv || '');
   const c = data.cijena || '';
   const k = data.kolicina || 1;
@@ -1941,13 +1933,16 @@ function addExtraItemToDOM(data) {
   const tot = (cij * kol).toFixed(2);
   
   const html = `<tr class="extra-row">
+    <td style="color:var(--jm);font-size:11px">EXTRA</td>
     <td><input type="text" value="${n}" placeholder="Naziv artikla" autocomplete="off"
       style="width:100%;padding:6px 8px;border:1.5px solid var(--jbr);border-radius:4px;font-size:12px;font-family:Verdana,sans-serif"
       oninput="updateTotalBar()"></td>
-    <td><input type="number" value="${c}" placeholder="0.00" step="0.01" autocomplete="off"
+    <td style="color:var(--jm);font-size:11px">—</td>
+    <td><input type="number" value="${c}" placeholder="0.00" step="0.01" min="0" autocomplete="off"
       class="qty-input" oninput="recalcExtraRow(this);updateTotalBar()"></td>
     <td><input type="number" value="${k}" min="1" autocomplete="off"
       class="qty-input" oninput="recalcExtraRow(this);updateTotalBar()"></td>
+    <td style="color:var(--jm);font-size:11px;text-align:center">—</td>
     <td class="text-right fw-bold extra-row-total">${tot}</td>
     <td class="text-center"><button class="btn btn-danger btn-sm" onclick="this.closest('tr').remove();updateTotalBar()">✕</button></td>
   </tr>`;
@@ -1959,8 +1954,11 @@ function recalcExtraRow(input) {
   const row = input.closest('tr');
   if (!row) return;
   const nums = row.querySelectorAll('input[type="number"]');
-  const cij = parseFloat(nums[0]?.value || 0);
-  const kol = parseInt(nums[1]?.value || 0);
+  const cij = Math.max(0, parseFloat(nums[0]?.value || 0));
+  const kol = Math.max(0, parseInt(nums[1]?.value || 0));
+  // Enforce min 0
+  if (nums[0] && parseFloat(nums[0].value) < 0) nums[0].value = 0;
+  if (nums[1] && parseInt(nums[1].value) < 0) nums[1].value = 0;
   const cell = row.querySelector('.extra-row-total');
   if (cell) cell.textContent = (cij * kol).toFixed(2);
 }
@@ -2159,6 +2157,34 @@ Zabilježite podatke:`;
       </div>
     </div>`;
   document.body.appendChild(overlay);
+}
+
+async function editPeriodDeadline(periodId, currentDate, currentTime) {
+  const newDate = prompt('Novi deadline datum (YYYY-MM-DD):', currentDate);
+  if (!newDate) return;
+  const newTime = prompt('Novo vrijeme (HH:MM):', currentTime?.substring(0,5) || '23:59');
+  if (!newTime) return;
+  
+  const { error } = await sb.from('period_settings').update({
+    deadline_datum: newDate,
+    deadline_vrijeme: newTime + ':00'
+  }).eq('id', periodId);
+  
+  if (error) { alert('Greška: ' + error.message); return; }
+  
+  // Osvježi globalni period
+  const { data: p } = await sb.from('period_settings').select('*').eq('aktivan', true).maybeSingle();
+  activePeriod = p;
+  
+  alert('✅ Deadline ažuriran!');
+  loadPeriod();
+}
+
+function setDrzavaFilter(val, btn) {
+  $('filterDrzava').value = val;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loadAdminNarudzbe();
 }
 
 function togglePasswordChange() {
