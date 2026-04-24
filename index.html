@@ -1148,7 +1148,8 @@ async function loadTrgovine() {
         : '<span class="badge" style="background:var(--jdab);color:var(--jda)">Neaktivna</span>'}</td>
       <td>
         <button class="btn-edit btn" onclick="openTrgovinaModal(${t.id})" style="margin-right:4px">Uredi</button>
-        <button class="btn-danger btn" onclick="toggleTrgovina(${t.id}, ${t.aktivan})">${t.aktivan ? 'Deaktiviraj' : 'Aktiviraj'}</button>
+        <button class="btn-danger btn" onclick="toggleTrgovina(${t.id}, ${t.aktivan})" style="margin-right:4px">${t.aktivan ? 'Deaktiviraj' : 'Aktiviraj'}</button>
+        <button class="btn-danger btn" onclick="deleteTrgovina(${t.id}, '${escHtml(t.naziv).replace(/'/g, "\\'")}')">🗑</button>
       </td>
     </tr>`;
   }
@@ -1219,73 +1220,82 @@ async function saveTrgovina() {
 
     if (trErr) { alert('Greška pri kreiranju poslovnice: ' + trErr.message); return; }
 
-    // Korak 2: Kreiraj auth usera
-    // Spremamo trenutnu admin sesiju
-    const { data: adminSession } = await sb.auth.getSession();
+    // Korak 2: Kreiraj auth usera kroz Edge Function (sigurno, serverski)
+    const { data: sessionData } = await sb.auth.getSession();
+    const accessToken = sessionData?.session?.access_token;
     
-    // Koristimo signUp za kreiranje novog usera
-    const { data: authData, error: authErr } = await sb.auth.signUp({
-      email: payload.email,
-      password: pass,
-      options: {
-        data: { role: 'store' },
-        emailRedirectTo: undefined
-      }
-    });
-    
-    if (authErr) {
-      alert('Poslovnica kreirana, ali greška pri kreiranju korisničkog računa: ' + authErr.message);
-    } else if (authData?.user?.id) {
-      // Poveži usera s trgovinom
-      // Moramo se vratiti na admin sesiju jer signUp nas prebaci
-      if (adminSession?.session) {
-        await sb.auth.setSession(adminSession.session);
-      }
-      
-      // Poveži user_id s trgovinom + potvrdi email u auth
-      const { error: linkErr } = await sb.from('trgovine')
-        .update({ user_id: authData.user.id })
-        .eq('id', novaTrgovina.id);
-      
-      // Potvrdi email i postavi role kroz SQL
-      await sb.rpc('confirm_store_user', { 
-        p_user_id: authData.user.id 
+    try {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/create-store-user`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+          'apikey': SUPABASE_ANON_KEY
+        },
+        body: JSON.stringify({
+          email: payload.email,
+          password: pass,
+          trgovina_id: novaTrgovina.id
+        })
       });
       
-      if (linkErr) {
-        alert('Korisnik kreiran, ali greška pri povezivanju: ' + linkErr.message);
-      } else {
-        showCredentials(payload.email, pass);
+      const result = await response.json();
+      
+      if (!response.ok || !result.success) {
+        // Rollback - obriši kreiranu trgovinu
+        await sb.from('trgovine').delete().eq('id', novaTrgovina.id);
+        alert('❌ Greška pri kreiranju korisnika: ' + (result.error || 'Nepoznata greška') + 
+              '\n\nProvjerite:\n- Je li Edge Function deployed?\n- Je li email već u upotrebi?');
+        return;
       }
-    } else {
-      alert('Poslovnica kreirana, ali korisnik možda čeka potvrdu emaila.');
+      
+      showCredentials(payload.email, pass);
+    } catch (fetchErr) {
+      // Rollback ako fetch padne
+      await sb.from('trgovine').delete().eq('id', novaTrgovina.id);
+      alert('❌ Greška mreže: ' + fetchErr.message + 
+            '\n\nProvjerite je li Edge Function "create-store-user" deployed u Supabase Dashboardu.');
+      return;
     }
   } else {
     // Uredi postojeću
     const { error } = await sb.from('trgovine').update(payload).eq('id', editingTrgovinaId);
     if (error) { alert('Greška: ' + error.message); return; }
     
-    // Promjena lozinke ako je unesena
+    // Promjena lozinke ako je unesena - preko Edge Function
     const novaLoz = $('trNovaLozinka')?.value?.trim();
     if (novaLoz && novaLoz.length >= 6) {
-      // Dohvati user_id ove trgovine
-      const { data: trData } = await sb.from('trgovine').select('user_id, email').eq('id', editingTrgovinaId).single();
+      const { data: trData } = await sb.from('trgovine').select('user_id, email').eq('id', editingTrgovinaId).maybeSingle();
       if (trData?.user_id) {
-        const { error: passErr } = await sb.rpc('admin_change_password', {
-          p_user_id: trData.user_id,
-          p_new_password: novaLoz
-        });
-        if (passErr) {
-          alert('Podaci poslovnice su ažurirani.\n\n⚠️ Lozinka nije promijenjena: ' + passErr.message);
-        } else {
-          alert(`✅ Podaci ažurirani!
-
-Nova lozinka za ${trData.email}: ${novaLoz}
-
-⚠️ Proslijedi poslovnici!`);
-          closeModal('trgovinaModal');
-          loadTrgovine();
-          return;
+        const { data: sessionData } = await sb.auth.getSession();
+        const accessToken = sessionData?.session?.access_token;
+        
+        try {
+          const response = await fetch(`${SUPABASE_URL}/functions/v1/change-store-password`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${accessToken}`,
+              'apikey': SUPABASE_ANON_KEY
+            },
+            body: JSON.stringify({
+              user_id: trData.user_id,
+              new_password: novaLoz
+            })
+          });
+          
+          const result = await response.json();
+          
+          if (!response.ok || !result.success) {
+            alert('Podaci poslovnice ažurirani.\n\n⚠️ Lozinka nije promijenjena: ' + (result.error || 'Greška'));
+          } else {
+            closeModal('trgovinaModal');
+            loadTrgovine();
+            showCredentials(trData.email, novaLoz, true);
+            return;
+          }
+        } catch (fetchErr) {
+          alert('Podaci ažurirani. Greška pri promjeni lozinke: ' + fetchErr.message);
         }
       }
     }
@@ -1296,9 +1306,48 @@ Nova lozinka za ${trData.email}: ${novaLoz}
 }
 
 async function toggleTrgovina(id, trenutnoAktivan) {
-  if (!confirm(`Želite li ${trenutnoAktivan ? 'deaktivirati' : 'aktivirati'} ovu poslovnicu?`)) return;
+  if (!confirm(`Želite li ${trenutnoAktivan ? 'deaktivirati' : 'aktivirati'} ovu poslovnicu?\n\n` +
+    `${trenutnoAktivan ? 'Deaktivirana poslovnica neće moći kreirati nove narudžbe, ali postojeći podaci ostaju.' : 'Aktivirana poslovnica ponovno može koristiti aplikaciju.'}`)) return;
   await sb.from('trgovine').update({ aktivan: !trenutnoAktivan }).eq('id', id);
   loadTrgovine();
+}
+
+async function deleteTrgovina(id, naziv) {
+  if (!confirm(`⚠️ TRAJNO obrisati poslovnicu "${naziv}"?\n\nOvo će obrisati:\n- Poslovnicu iz baze\n- Korisnički račun\n- Sve narudžbe i stavke\n\nOvu akciju NIJE moguće poništiti!`)) return;
+  if (!confirm(`Posljednja potvrda: zaista obrisati "${naziv}"?`)) return;
+  
+  // Dohvati user_id
+  const { data: tr } = await sb.from('trgovine').select('user_id').eq('id', id).maybeSingle();
+  
+  // Obriši auth usera preko Edge Function
+  if (tr?.user_id) {
+    const { data: sessionData } = await sb.auth.getSession();
+    const accessToken = sessionData?.session?.access_token;
+    
+    try {
+      await fetch(`${SUPABASE_URL}/functions/v1/delete-store-user`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+          'apikey': SUPABASE_ANON_KEY
+        },
+        body: JSON.stringify({ user_id: tr.user_id })
+      });
+    } catch (e) {
+      console.error('Edge function error:', e);
+    }
+  }
+  
+  // Obriši poslovnicu (narudžbe i stavke se kaskadno brišu)
+  const { error } = await sb.from('trgovine').delete().eq('id', id);
+  
+  if (error) {
+    alert('Greška pri brisanju: ' + error.message);
+  } else {
+    alert('✅ Poslovnica obrisana.');
+    loadTrgovine();
+  }
 }
 
 // ═══════════════════════════════════════════════════════
