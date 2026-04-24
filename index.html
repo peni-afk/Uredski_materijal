@@ -641,9 +641,20 @@ function showErr(msg) {
 }
 
 async function doLogout() {
+  // Upozori store ako ima narudžbu u nacrtu
+  if (userRole !== 'admin' && storeOrderId) {
+    const { data: nac } = await sb.from('narudzbe').select('status').eq('id', storeOrderId).maybeSingle();
+    if (nac?.status === 'nacrt') {
+      const ok = confirm('⚠️ Imate narudžbu u nacrtu koja nije predana!
+
+Jeste li sigurni da se želite odjaviti?');
+      if (!ok) return;
+    }
+  }
   await sb.auth.signOut();
   clearInterval(countdownInterval);
-  currentUser = null; userRole = null; userTrgovina = null; activePeriod = null;
+  currentUser = null; userRole = null; userTrgovina = null; activePeriod = null; storeOrderId = null;
+  storeOrderItems = {}; storeExtraItems = [];
   $('loginPage').style.display = 'flex';
   $('appShell').style.display = 'none';
   $('loginEmail').value = ''; $('loginPassword').value = '';
@@ -661,8 +672,8 @@ async function initApp(user) {
   $('userAvatar').textContent = initials;
   $('userEmail').textContent = user.email;
 
-  // Dohvati aktivan period
-  const { data: period } = await sb.from('period_settings').select('*').eq('aktivan', true).single();
+  // Dohvati aktivan period (maybeSingle = null ako nema, bez crash-a)
+  const { data: period } = await sb.from('period_settings').select('*').eq('aktivan', true).maybeSingle();
   activePeriod = period;
 
   // Renderaj sidebar ovisno o roli
@@ -672,8 +683,8 @@ async function initApp(user) {
     await loadAdminDashboard();
     showPage('admin-dashboard');
   } else {
-    // Dohvati podatke o trgovini
-    const { data: trg } = await sb.from('trgovine').select('*').eq('user_id', user.id).single();
+    // Dohvati podatke o trgovini (maybeSingle = null ako nema, bez crash-a)
+    const { data: trg } = await sb.from('trgovine').select('*').eq('user_id', user.id).maybeSingle();
     userTrgovina = trg;
     await loadStoreDashboard();
     showPage('store-dashboard');
@@ -1093,7 +1104,7 @@ async function loadTrgovine() {
 
   let html = `<table><thead><tr>
     <th>Naziv</th><th>Država</th><th>Grad</th><th>Email / Login</th>
-    <th>Kontakt</th><th>Min. iznos</th><th>Status</th><th></th>
+    <th>Kontakt</th><th>Min. iznos</th><th>Auth</th><th>Status</th><th></th>
   </tr></thead><tbody>`;
 
   const valuta = {HR:'EUR',BA:'KM',SI:'EUR',RS:'RSD'};
@@ -1106,6 +1117,9 @@ async function loadTrgovine() {
       <td style="font-family:monospace;font-size:11px">${escHtml(t.email||'—')}</td>
       <td>${escHtml(t.kontakt_osoba||'—')}</td>
       <td>${parseFloat(t.minimalni_iznos||0).toFixed(2)} ${cur}</td>
+      <td>${t.user_id
+        ? '<span class="badge badge-ok">✓ Povezan</span>'
+        : '<span class="badge badge-draft">⚠ Nije povezan</span>'}</td>
       <td>${t.aktivan
         ? '<span class="badge badge-ok">Aktivna</span>'
         : '<span class="badge" style="background:var(--jdab);color:var(--jda)">Neaktivna</span>'}</td>
@@ -1196,7 +1210,8 @@ async function saveTrgovina() {
       alert('Poslovnica kreirana, ali greška pri korisničkom računu: ' + rpcResult.error +
         '\n\nMoguće da email već postoji. Provjerite u Supabase → Authentication → Users.');
     } else {
-      alert(`✅ Poslovnica kreirana!\n\nEmail: ${payload.email}\nLozinka: ${pass}\n\n⚠️ Prosljedite ove podatke poslovnici!`);
+      // Prikaži credentials na siguran način
+      showCredentials(payload.email, pass);
     }
   } else {
     // Uredi postojeću
@@ -1285,6 +1300,13 @@ async function savePeriod() {
   };
 
   if (!payload.mjesec || !payload.deadline_datum) { alert('Naziv mjeseca i deadline su obavezni!'); return; }
+  
+  // Provjeri da deadline nije u prošlosti
+  const deadlineDate = new Date(`${payload.deadline_datum}T${payload.deadline_vrijeme}`);
+  if (deadlineDate <= new Date()) {
+    const ok = confirm('⚠️ Uneseni deadline je u prošlosti! Jeste li sigurni?');
+    if (!ok) return;
+  }
 
   // Zatvori sve aktivne periode
   await sb.from('period_settings').update({ aktivan: false }).eq('aktivan', true);
@@ -1751,10 +1773,15 @@ function calcTotal() {
   for (const item of Object.values(storeOrderItems)) {
     total += (item.kolicina || 0) * (item.cijena || 0);
   }
-  for (let i = 0; i < storeExtraItems.length; i++) {
-    const kol = parseInt($(`extraKol${i}`)?.value || storeExtraItems[i].kolicina || 0);
-    const cij = parseFloat($(`extraCijena${i}`)?.value || storeExtraItems[i].cijena || 0);
-    total += kol * cij;
+  // Extra items iz DOM-a
+  const extraList = $('extraItemsList');
+  if (extraList) {
+    extraList.querySelectorAll('.extra-item-row').forEach(row => {
+      const inputs = row.querySelectorAll('input[type="number"]');
+      const cij = parseFloat(inputs[0]?.value || 0);
+      const kol = parseInt(inputs[1]?.value || 0);
+      total += cij * kol;
+    });
   }
   return total;
 }
@@ -1776,13 +1803,33 @@ function updateTotalBar() {
 }
 
 function addExtra() {
+  const list = $('extraItemsList');
+  if (!list) return;
+  const idx = list.children.length;
+  const row = document.createElement('div');
+  row.className = 'extra-item-row';
+  row.id = `extraRow${idx}`;
+  row.innerHTML = `
+    <input type="text" placeholder="Naziv artikla" id="extraNaziv${idx}">
+    <input type="number" placeholder="Cijena" step="0.01" style="width:100px" id="extraCijena${idx}">
+    <input type="number" placeholder="Kol." min="1" value="1" style="width:70px" id="extraKol${idx}">
+    <button class="btn btn-danger" onclick="removeExtraRow(this)">✕</button>`;
+  list.appendChild(row);
   storeExtraItems.push({ naziv: '', cijena: 0, kolicina: 1 });
-  loadStoreOrder();
+  updateTotalBar();
+}
+
+function removeExtraRow(btn) {
+  const row = btn.closest('.extra-item-row');
+  if (row) row.remove();
+  updateTotalBar();
 }
 
 function removeExtra(idx) {
+  const row = $(`extraRow${idx}`);
+  if (row) row.remove();
   storeExtraItems.splice(idx, 1);
-  loadStoreOrder();
+  updateTotalBar();
 }
 
 async function saveOrderDraft() {
@@ -1791,6 +1838,17 @@ async function saveOrderDraft() {
 }
 
 async function submitOrder() {
+  // Provjera deadlinea
+  if (activePeriod) {
+    const deadline = new Date(`${activePeriod.deadline_datum}T${activePeriod.deadline_vrijeme}`);
+    if (new Date() > deadline) {
+      alert('⚠️ Rok za predaju narudžbe je istekao!
+
+Kontaktirajte admina ako trebate produženje.');
+      return;
+    }
+  }
+
   const ukupno = calcTotal();
   const min = parseFloat(userTrgovina.minimalni_iznos || 0);
 
@@ -1827,19 +1885,26 @@ async function persistOrder(status) {
     }
   }
 
-  // Extra artikli
-  for (let i = 0; i < storeExtraItems.length; i++) {
-    const naziv = $(`extraNaziv${i}`)?.value?.trim();
-    const cijena = parseFloat($(`extraCijena${i}`)?.value || 0);
-    const kolicina = parseInt($(`extraKol${i}`)?.value || 1);
-    if (naziv && cijena > 0) {
-      noveStavke.push({
-        narudzba_id: storeOrderId,
-        extra_naziv: naziv,
-        kolicina,
-        cijena,
-      });
-    }
+  // Extra artikli - čitaj iz DOM-a (svi redovi u extraItemsList)
+  const extraList = $('extraItemsList');
+  if (extraList) {
+    const extraRows = extraList.querySelectorAll('.extra-item-row');
+    extraRows.forEach((row, i) => {
+      const nazEl = row.querySelector('input[type="text"]');
+      const cijEl = row.querySelectorAll('input[type="number"]')[0];
+      const kolEl = row.querySelectorAll('input[type="number"]')[1];
+      const naziv = nazEl?.value?.trim();
+      const cijena = parseFloat(cijEl?.value || 0);
+      const kolicina = parseInt(kolEl?.value || 1);
+      if (naziv && cijena > 0 && kolicina > 0) {
+        noveStavke.push({
+          narudzba_id: storeOrderId,
+          extra_naziv: naziv,
+          kolicina,
+          cijena,
+        });
+      }
+    });
   }
 
   if (noveStavke.length) {
@@ -1896,6 +1961,45 @@ async function loadStorePovijest() {
 // ═══════════════════════════════════════════════════════
 // INIT — Provjeri postojeću sesiju
 // ═══════════════════════════════════════════════════════
+// Prikazuje credentials u posebnom modalnom dijalogu (ne u alert)
+function showCredentials(email, lozinka, isChange = false) {
+  const msg = isChange
+    ? `✅ Lozinka promijenjena!
+
+Zabilježite podatke:`
+    : `✅ Poslovnica kreirana!
+
+Zabilježite podatke:`;
+  
+  // Kreiraj privremeni modal za credentials
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  overlay.innerHTML = `
+    <div style="background:white;border-radius:8px;padding:28px;max-width:420px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,0.2)">
+      <div style="font-size:16px;font-weight:700;color:#143c8a;margin-bottom:16px">${msg}</div>
+      <div style="background:#f0f4fb;border:1px solid #c5cfdf;border-radius:6px;padding:16px;margin-bottom:16px;font-family:monospace">
+        <div style="font-size:12px;color:#5a6580;margin-bottom:4px">EMAIL (LOGIN):</div>
+        <div style="font-size:14px;font-weight:700;color:#1a1e2e;margin-bottom:12px">${email}</div>
+        <div style="font-size:12px;color:#5a6580;margin-bottom:4px">LOZINKA:</div>
+        <div style="font-size:14px;font-weight:700;color:#143c8a">${lozinka}</div>
+      </div>
+      <div style="font-size:11px;color:#9a5000;background:#fff4e0;border:1px solid #9a5000;border-radius:4px;padding:10px;margin-bottom:16px">
+        ⚠️ Ove podatke proslijedite poslovnici. Nakon zatvaranja ovog prozora lozinka više neće biti vidljiva.
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button onclick="navigator.clipboard?.writeText('Email: ${email}\nLozinka: ${lozinka}').then(()=>alert('Kopirano!'))" 
+          style="padding:8px 14px;background:#f0f4fb;border:1px solid #c5cfdf;border-radius:4px;cursor:pointer;font-family:Verdana,sans-serif;font-size:11px">
+          📋 Kopiraj
+        </button>
+        <button onclick="this.closest('[style*=position]').remove()" 
+          style="padding:8px 16px;background:#143c8a;color:white;border:none;border-radius:4px;cursor:pointer;font-family:Verdana,sans-serif;font-size:11px;font-weight:700">
+          Razumijem, zatvori
+        </button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
 function togglePasswordChange() {
   const grp = $('trNewPasswordGroup');
   if (grp) {
