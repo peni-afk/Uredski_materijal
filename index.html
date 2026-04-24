@@ -174,7 +174,11 @@ tr:hover td{background:var(--jbgl)}
 <div class="login-wrap" id="loginPage">
   <div class="login-box">
     <div class="login-logo">
-      <svg width="120" height="48" viewBox="0 0 120 48" fill="none">
+      <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/d/d2/JYSK_logo.svg/320px-JYSK_logo.svg.png" 
+           alt="JYSK" height="48" 
+           onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"
+           style="object-fit:contain">
+      <svg width="120" height="48" viewBox="0 0 120 48" fill="none" style="display:none">
         <rect width="120" height="48" rx="4" fill="#143c8a"/>
         <text x="60" y="32" text-anchor="middle" font-family="Verdana,Geneva,sans-serif" font-weight="700" font-size="22" fill="white" letter-spacing="2">JYSK</text>
       </svg>
@@ -199,7 +203,11 @@ tr:hover td{background:var(--jbgl)}
   <!-- TOPBAR -->
   <div class="topbar">
     <div class="topbar-left">
-      <svg width="80" height="32" viewBox="0 0 120 48" fill="none">
+      <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/d/d2/JYSK_logo.svg/320px-JYSK_logo.svg.png" 
+           alt="JYSK" height="28" 
+           style="object-fit:contain;filter:brightness(0) invert(1)"
+           onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+      <svg width="80" height="32" viewBox="0 0 120 48" fill="none" style="display:none">
         <rect width="120" height="48" rx="4" fill="white" fill-opacity=".15"/>
         <text x="60" y="32" text-anchor="middle" font-family="Verdana,Geneva,sans-serif" font-weight="700" font-size="22" fill="white" letter-spacing="2">JYSK</text>
       </svg>
@@ -481,6 +489,19 @@ tr:hover td{background:var(--jbgl)}
       <div class="form-group" id="trPasswordGroup">
         <label>Lozinka *</label>
         <input type="text" id="trPassword" placeholder="min. 6 znakova">
+      </div>
+      <div id="trPasswordChangeGroup" style="display:none">
+        <div style="font-size:10px;color:var(--jm);margin-bottom:8px">
+          <button type="button" onclick="togglePasswordChange()" style="background:none;border:1px solid var(--jbr);border-radius:4px;padding:5px 10px;font-size:11px;cursor:pointer;color:var(--jb);font-family:Verdana,sans-serif">
+            🔑 Promijeni lozinku
+          </button>
+        </div>
+        <div id="trNewPasswordGroup" style="display:none">
+          <div class="form-group">
+            <label>Nova lozinka</label>
+            <input type="text" id="trNovaLozinka" placeholder="min. 6 znakova">
+          </div>
+        </div>
       </div>
       <div style="font-size:10px;color:var(--jm)">ℹ️ Email i lozinka koriste se za prijavu u aplikaciju. Admin ručno prosljeđuje lozinku poslovnici.</div>
     </div>
@@ -990,12 +1011,14 @@ async function loadArtikli() {
 function openArtiklModal(id = null) {
   editingArtiklId = id;
   $('artiklModalTitle').textContent = id ? 'Uredi artikl' : 'Novi artikl';
+  // Uvijek resetiraj formu prvo
+  ['artSifra','artNaziv','artDobavljac','artKategorija'].forEach(f => { if($(f)) $(f).value = ''; });
+  ['artCijenaHr','artCijenaBa','artCijenaSi','artCijenaRs'].forEach(f => { if($(f)) $(f).value = ''; });
+  if($('artMaxKol')) $('artMaxKol').value = '999';
+  if($('artAktivan')) $('artAktivan').checked = true;
+  editingArtiklId = id;
+  
   if (!id) {
-    ['artSifra','artNaziv','artDobavljac'].forEach(f => $(f).value = '');
-    ['artCijenaHr','artCijenaBa','artCijenaSi','artCijenaRs'].forEach(f => $(f).value = '');
-    $('artMaxKol').value = '999';
-    $('artKategorija').value = '';
-    $('artAktivan').checked = true;
     showModal('artiklModal'); return;
   }
   sb.from('artikli').select('*').eq('id', id).single().then(({ data: a }) => {
@@ -1099,12 +1122,22 @@ async function loadTrgovine() {
 function openTrgovinaModal(id = null) {
   editingTrgovinaId = id;
   $('trgovinaModalTitle').textContent = id ? 'Uredi poslovnicu' : 'Nova poslovnica';
-  $('trPasswordGroup').style.display = id ? 'none' : 'block';
+  
+  // Uvijek resetiraj formu prvo
+  ['trNaziv','trGrad','trAdresa','trKontakt','trTelefon','trEmail','trPassword','trNovaLozinka'].forEach(f => { 
+    if($(f)) $(f).value = ''; 
+  });
+  $('trMinIznos').value = '150.00';
+  $('trDrzava').value = 'HR';
+  
+  editingTrgovinaId = id;
+  $('trPasswordGroup').style.display = 'none'; // uvijek skrij na početku
+  $('trPasswordChangeGroup').style.display = id ? 'block' : 'none';
+  $('trNewPasswordGroup').style.display = 'none';
 
   if (!id) {
-    ['trNaziv','trGrad','trAdresa','trKontakt','trTelefon','trEmail','trPassword'].forEach(f => $(f).value = '');
-    $('trMinIznos').value = '150.00';
-    $('trDrzava').value = 'HR';
+    $('trPasswordGroup').style.display = 'block'; // prikaži za novu
+    $('trPasswordChangeGroup').style.display = 'none';
     showModal('trgovinaModal'); return;
   }
   sb.from('trgovine').select('*').eq('id', id).single().then(({ data: t }) => {
@@ -1169,6 +1202,33 @@ async function saveTrgovina() {
     // Uredi postojeću
     const { error } = await sb.from('trgovine').update(payload).eq('id', editingTrgovinaId);
     if (error) { alert('Greška: ' + error.message); return; }
+    
+    // Promjena lozinke ako je unesena
+    const novaLoz = $('trNovaLozinka')?.value?.trim();
+    if (novaLoz && novaLoz.length >= 6) {
+      // Dohvati user_id ove trgovine
+      const { data: trData } = await sb.from('trgovine').select('user_id, email').eq('id', editingTrgovinaId).single();
+      if (trData?.user_id) {
+        const { error: passErr } = await sb.rpc('admin_change_password', {
+          p_user_id: trData.user_id,
+          p_new_password: novaLoz
+        });
+        if (passErr) {
+          alert('Podaci poslovnice su ažurirani.
+
+⚠️ Lozinka nije promijenjena: ' + passErr.message);
+        } else {
+          alert(`✅ Podaci ažurirani!
+
+Nova lozinka za ${trData.email}: ${novaLoz}
+
+⚠️ Proslijedi poslovnici!`);
+          closeModal('trgovinaModal');
+          loadTrgovine();
+          return;
+        }
+      }
+    }
   }
 
   closeModal('trgovinaModal');
@@ -1476,10 +1536,14 @@ async function loadStoreOrder() {
     .maybeSingle();
 
   if (!narudzba) {
+    // Dohvati točne nazive kolona iz period_settings
+    const periodMjesec = activePeriod.mjesec;
+    const periodGodina = activePeriod.godina;
+    
     const { data: newN, error: insertErr } = await sb.from('narudzbe').insert({
       trgovina_id: userTrgovina.id,
-      period_mjesec: activePeriod.mjesec,
-      period_godina: activePeriod.godina,
+      period_mjesec: periodMjesec,
+      period_godina: periodGodina,
       status: 'nacrt',
       ukupni_iznos: 0,
     }).select().single();
@@ -1832,6 +1896,16 @@ async function loadStorePovijest() {
 // ═══════════════════════════════════════════════════════
 // INIT — Provjeri postojeću sesiju
 // ═══════════════════════════════════════════════════════
+function togglePasswordChange() {
+  const grp = $('trNewPasswordGroup');
+  if (grp) {
+    grp.style.display = grp.style.display === 'none' ? 'block' : 'none';
+    if (grp.style.display === 'none' && $('trNovaLozinka')) {
+      $('trNovaLozinka').value = '';
+    }
+  }
+}
+
 window.addEventListener('DOMContentLoaded', async () => {
   const { data: { session } } = await sb.auth.getSession();
   if (session?.user) {
