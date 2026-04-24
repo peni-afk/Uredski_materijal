@@ -645,9 +645,7 @@ async function doLogout() {
   if (userRole !== 'admin' && storeOrderId) {
     const { data: nac } = await sb.from('narudzbe').select('status').eq('id', storeOrderId).maybeSingle();
     if (nac?.status === 'nacrt') {
-      const ok = confirm('⚠️ Imate narudžbu u nacrtu koja nije predana!
-
-Jeste li sigurni da se želite odjaviti?');
+      const ok = confirm('⚠️ Imate narudžbu u nacrtu koja nije predana!\n\nJeste li sigurni da se želite odjaviti?');
       if (!ok) return;
     }
   }
@@ -1229,9 +1227,7 @@ async function saveTrgovina() {
           p_new_password: novaLoz
         });
         if (passErr) {
-          alert('Podaci poslovnice su ažurirani.
-
-⚠️ Lozinka nije promijenjena: ' + passErr.message);
+          alert('Podaci poslovnice su ažurirani.\n\n⚠️ Lozinka nije promijenjena: ' + passErr.message);
         } else {
           alert(`✅ Podaci ažurirani!
 
@@ -1842,9 +1838,7 @@ async function submitOrder() {
   if (activePeriod) {
     const deadline = new Date(`${activePeriod.deadline_datum}T${activePeriod.deadline_vrijeme}`);
     if (new Date() > deadline) {
-      alert('⚠️ Rok za predaju narudžbe je istekao!
-
-Kontaktirajte admina ako trebate produženje.');
+      alert('⚠️ Rok za predaju narudžbe je istekao!\n\nKontaktirajte admina ako trebate produženje.');
       return;
     }
   }
