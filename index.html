@@ -9,9 +9,9 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --jb:#224493;--jbd:#1a3478;--jbl:#2a52b0;
-  --jbg:#edf0f8;--jbgl:#f4f6fb;--jy:#F5C800;
-  --jt:#1a1e2e;--jm:#5a6580;--jbr:#cdd4e8;
+  --jb:#143c8a;--jbd:#0e2d6b;--jbl:#1a4fa8;
+  --jbg:#e8eef8;--jbgl:#f0f4fb;--jy:#F5C800;
+  --jt:#1a1e2e;--jm:#5a6580;--jbr:#c5cfdf;
   --js:#f5f7fc;--jok:#1a6e35;--jokb:#e6f4ec;
   --jwa:#9a5000;--jwab:#fff4e0;--jda:#b81c1c;--jdab:#fdeaea;
 }
@@ -174,9 +174,9 @@ tr:hover td{background:var(--jbgl)}
 <div class="login-wrap" id="loginPage">
   <div class="login-box">
     <div class="login-logo">
-      <svg width="80" height="32" viewBox="0 0 80 32" fill="none">
-        <rect width="80" height="32" rx="3" fill="#224493"/>
-        <text x="40" y="22" text-anchor="middle" font-family="Verdana,sans-serif" font-weight="700" font-size="14" fill="white" letter-spacing="1">JYSK</text>
+      <svg width="120" height="48" viewBox="0 0 120 48" fill="none">
+        <rect width="120" height="48" rx="4" fill="#143c8a"/>
+        <text x="60" y="32" text-anchor="middle" font-family="Verdana,Geneva,sans-serif" font-weight="700" font-size="22" fill="white" letter-spacing="2">JYSK</text>
       </svg>
     </div>
     <div class="login-title">Naručivanje uredskog materijala</div>
@@ -199,9 +199,9 @@ tr:hover td{background:var(--jbgl)}
   <!-- TOPBAR -->
   <div class="topbar">
     <div class="topbar-left">
-      <svg width="60" height="24" viewBox="0 0 80 32" fill="none">
-        <rect width="80" height="32" rx="3" fill="white" fill-opacity=".18"/>
-        <text x="40" y="22" text-anchor="middle" font-family="Verdana,sans-serif" font-weight="700" font-size="14" fill="white" letter-spacing="1">JYSK</text>
+      <svg width="80" height="32" viewBox="0 0 120 48" fill="none">
+        <rect width="120" height="48" rx="4" fill="white" fill-opacity=".15"/>
+        <text x="60" y="32" text-anchor="middle" font-family="Verdana,Geneva,sans-serif" font-weight="700" font-size="22" fill="white" letter-spacing="2">JYSK</text>
       </svg>
       <span class="app-subtitle">Naručivanje uredskog materijala</span>
     </div>
@@ -282,10 +282,6 @@ tr:hover td{background:var(--jbgl)}
         <div class="filter-row">
           <select class="filter-select" id="filterKategorija" onchange="loadArtikli()">
             <option value="">Sve kategorije</option>
-            <option value="Papir">Papir</option>
-            <option value="Pribor">Pribor</option>
-            <option value="Arhiviranje">Arhiviranje</option>
-            <option value="IT">IT</option>
           </select>
           <input class="search-input" placeholder="Pretraži artikle..." id="searchArtikli" oninput="loadArtikli()">
         </div>
@@ -383,13 +379,7 @@ tr:hover td{background:var(--jbgl)}
       </div>
       <div class="form-group">
         <label>Kategorija</label>
-        <select id="artKategorija">
-          <option value="Papir">Papir</option>
-          <option value="Pribor">Pribor</option>
-          <option value="Arhiviranje">Arhiviranje</option>
-          <option value="IT">IT</option>
-          <option value="Ostalo">Ostalo</option>
-        </select>
+        <input type="text" id="artKategorija" placeholder="npr. Papir, Pribor, IT...">
       </div>
     </div>
     <div class="form-group">
@@ -640,7 +630,7 @@ async function doLogout() {
 
 async function initApp(user) {
   currentUser = user;
-  userRole = user.user_metadata?.role || 'store';
+  userRole = user.user_metadata?.role || user.app_metadata?.role || 'store';
 
   $('loginPage').style.display = 'none';
   $('appShell').style.display = 'flex';
@@ -750,7 +740,7 @@ async function loadAdminDashboard() {
   const total = narudzbe?.length || 0;
   const predano = narudzbe?.filter(n => n.status === 'predano').length || 0;
   const totalAmt = narudzbe?.reduce((s,n) => s + (n.ukupni_iznos||0), 0) || 0;
-  const aktivnih = sveTrgovine?.length || 0;
+  const aktivnih = sveTrgovine?.filter(t => t.aktivan).length || 0;
 
   $('dashMetrics').innerHTML = `
     <div class="metric">
@@ -947,14 +937,20 @@ async function loadArtikli() {
   const kat  = $('filterKategorija').value;
   const srch = $('searchArtikli').value.toLowerCase();
 
-  let q = sb.from('artikli').select('*').order('sifra');
-  if (kat) q = q.eq('kategorija', kat);
-  const { data } = await q;
+  const { data } = await sb.from('artikli').select('*').order('kategorija').order('sifra');
+
+  // Dinamički popuni filter kategorija
+  const kategorije = [...new Set((data||[]).map(a => a.kategorija).filter(Boolean))].sort();
+  const filterEl = $('filterKategorija');
+  const currentVal = filterEl.value;
+  filterEl.innerHTML = '<option value="">Sve kategorije</option>' +
+    kategorije.map(k => `<option value="${k}" ${k===currentVal?'selected':''}>${k}</option>`).join('');
 
   let filtered = (data || []).filter(a =>
-    !srch ||
-    a.naziv?.toLowerCase().includes(srch) ||
-    a.sifra?.toLowerCase().includes(srch)
+    (!kat || a.kategorija === kat) &&
+    (!srch ||
+      a.naziv?.toLowerCase().includes(srch) ||
+      a.sifra?.toLowerCase().includes(srch))
   );
 
   if (!filtered.length) {
@@ -998,14 +994,14 @@ function openArtiklModal(id = null) {
     ['artSifra','artNaziv','artDobavljac'].forEach(f => $(f).value = '');
     ['artCijenaHr','artCijenaBa','artCijenaSi','artCijenaRs'].forEach(f => $(f).value = '');
     $('artMaxKol').value = '999';
-    $('artKategorija').value = 'Papir';
+    $('artKategorija').value = '';
     $('artAktivan').checked = true;
     showModal('artiklModal'); return;
   }
   sb.from('artikli').select('*').eq('id', id).single().then(({ data: a }) => {
     $('artSifra').value = a.sifra || '';
     $('artNaziv').value = a.naziv || '';
-    $('artKategorija').value = a.kategorija || 'Papir';
+    $('artKategorija').value = a.kategorija || '';
     $('artCijenaHr').value = a.cijena_hr || '';
     $('artCijenaBa').value = a.cijena_ba || '';
     $('artCijenaSi').value = a.cijena_si || '';
@@ -1140,28 +1136,35 @@ async function saveTrgovina() {
   if (!payload.naziv || !payload.email) { alert('Naziv i email su obavezni!'); return; }
 
   if (!editingTrgovinaId) {
-    // Nova poslovnica — kreiraj auth usera + trgovinu
+    // Nova poslovnica — korak 1: kreiraj zapis u trgovine (bez user_id)
     const pass = $('trPassword').value;
     if (!pass || pass.length < 6) { alert('Lozinka mora imati najmanje 6 znakova!'); return; }
 
-    // Kreiraj auth usera kroz Supabase signup
-    const { data: authData, error: authErr } = await sb.auth.signUp({
-      email: payload.email,
-      password: pass,
-      options: { data: { role: 'store' } }
+    // Kreiraj trgovinu u bazi
+    const { data: novaTrgovina, error: trErr } = await sb
+      .from('trgovine')
+      .insert({ ...payload, user_id: null })
+      .select()
+      .single();
+
+    if (trErr) { alert('Greška pri kreiranju poslovnice: ' + trErr.message); return; }
+
+    // Korak 2: Kreiraj auth usera kroz SQL funkciju i poveži s trgovinom
+    const { data: rpcResult, error: rpcErr } = await sb.rpc('create_store_user', {
+      p_email: payload.email,
+      p_password: pass,
+      p_trgovina_id: novaTrgovina.id
     });
 
-    if (authErr) { alert('Greška pri kreiranju korisnika: ' + authErr.message); return; }
-
-    // Kreiraj zapis u trgovine
-    const { error } = await sb.from('trgovine').insert({
-      ...payload,
-      user_id: authData.user?.id || null
-    });
-
-    if (error) { alert('Greška pri kreiranju poslovnice: ' + error.message); return; }
-
-    alert(`✅ Poslovnica kreirana!\n\nEmail: ${payload.email}\nLozinka: ${pass}\n\nProsljedite ove podatke poslovnici.`);
+    if (rpcErr) {
+      alert('Poslovnica kreirana, ali greška pri kreiranju korisničkog računa: ' + rpcErr.message +
+        '\n\nKorisnika možete ručno kreirati u Supabase Dashboardu.');
+    } else if (rpcResult?.success === false) {
+      alert('Poslovnica kreirana, ali greška pri korisničkom računu: ' + rpcResult.error +
+        '\n\nMoguće da email već postoji. Provjerite u Supabase → Authentication → Users.');
+    } else {
+      alert(`✅ Poslovnica kreirana!\n\nEmail: ${payload.email}\nLozinka: ${pass}\n\n⚠️ Prosljedite ove podatke poslovnici!`);
+    }
   } else {
     // Uredi postojeću
     const { error } = await sb.from('trgovine').update(payload).eq('id', editingTrgovinaId);
@@ -1473,23 +1476,32 @@ async function loadStoreOrder() {
     .maybeSingle();
 
   if (!narudzba) {
-    const { data: newN } = await sb.from('narudzbe').insert({
+    const { data: newN, error: insertErr } = await sb.from('narudzbe').insert({
       trgovina_id: userTrgovina.id,
       period_mjesec: activePeriod.mjesec,
       period_godina: activePeriod.godina,
       status: 'nacrt',
       ukupni_iznos: 0,
     }).select().single();
+    if (insertErr) {
+      $('storeOrderContent').innerHTML = `<div class="alert alert-danger">⚠️ Greška pri kreiranju narudžbe: ${insertErr.message}<br><small>Kontaktirajte admina.</small></div>`;
+      return;
+    }
     narudzba = newN;
   }
 
   storeOrderId = narudzba.id;
 
-  // Dohvati artikle za ovu državu
+  // Dohvati artikle aktivne za ovu državu
+  // Filtriramo po tome ima li artikl cijenu za tu državu
+  const cijenaKolona = {HR:'cijena_hr',BA:'cijena_ba',SI:'cijena_si',RS:'cijena_rs'};
+  const cijenaCol = cijenaKolona[userTrgovina.drzava] || 'cijena_hr';
   const { data: artikli } = await sb
     .from('artikli')
     .select('*')
     .eq('aktivan', true)
+    .not(cijenaCol, 'is', null)
+    .gt(cijenaCol, 0)
     .order('kategorija')
     .order('naziv');
 
