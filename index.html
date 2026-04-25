@@ -67,8 +67,8 @@ body{font-family:'Verdana',Geneva,sans-serif;background:var(--js);color:var(--jt
 .card-title{font-size:11px;font-weight:700;color:var(--jm);text-transform:uppercase;letter-spacing:.7px;margin-bottom:12px}
 
 table{width:100%;border-collapse:collapse;font-size:12px}
-thead{background:var(--jbg)}
-th{text-align:left;padding:8px 11px;font-size:9px;color:var(--jb);text-transform:uppercase;letter-spacing:.7px;border-bottom:1px solid var(--jbr);font-weight:700}
+thead{background:var(--jb);color:white}
+th{text-align:left;padding:9px 11px;font-size:9px;color:white;text-transform:uppercase;letter-spacing:.7px;border-bottom:none;font-weight:700}
 td{padding:9px 11px;border-bottom:1px solid var(--jbr);vertical-align:middle}
 tr:last-child td{border-bottom:none}
 tr:hover td{background:var(--jbgl)}
@@ -181,8 +181,8 @@ tr:hover td{background:var(--jbgl)}
 
 /* ── ORDER TABLE ── */
 .order-table{width:100%;border-collapse:collapse;font-size:12px}
-.order-table thead{background:var(--jbg)}
-.order-table th{text-align:left;padding:8px 10px;font-size:9px;color:var(--jb);text-transform:uppercase;letter-spacing:.7px;border-bottom:1px solid var(--jbr);font-weight:700}
+.order-table thead{background:var(--jb);color:white}
+.order-table th{text-align:left;padding:9px 10px;font-size:9px;color:white;text-transform:uppercase;letter-spacing:.7px;border-bottom:none;font-weight:700}
 .order-table td{padding:8px 10px;border-bottom:1px solid var(--jbr);vertical-align:middle}
 .order-table tr:hover td{background:var(--jbgl)}
 .order-table tr.row-active td{background:#f0f7ff}
@@ -214,6 +214,8 @@ tr:hover td{background:var(--jbgl)}
   .card{overflow-x:auto}
   .order-table{min-width:600px}
   table{min-width:500px}
+  .filter-row{flex-direction:row!important;flex-wrap:wrap;gap:4px!important}
+  .filter-btn{padding:6px 12px!important;font-size:10px!important;flex:0 0 auto}
 }
 @media (max-width: 768px) {
   .main-wrap{flex-direction:column}
@@ -253,6 +255,7 @@ tr:hover td{background:var(--jbgl)}
   .countdown-time{font-size:16px}
   body{font-size:12px}
 }
+thead th{color:white!important;background:var(--jb)!important;border-bottom:none!important}
 </style>
 </head>
 <body>
@@ -823,11 +826,14 @@ async function loadAdminDashboard() {
 
   $('dashPeriodChip').innerHTML = `<span class="period-chip">📅 ${escHtml(activePeriod.mjesec)}</span>`;
 
-  const { data: narudzbe } = await sb
+  // Dohvati SVE narudžbe za aktivan period
+  const { data: narudzbe, error: narErr } = await sb
     .from('narudzbe')
     .select('*, trgovine(naziv, drzava, minimalni_iznos, email, kontakt_osoba)')
     .eq('period_mjesec', activePeriod.mjesec)
     .eq('period_godina', activePeriod.godina);
+  
+  if (narErr) console.error('Dashboard narudzbe error:', narErr);
 
   const { data: sveTrgovine } = await sb.from('trgovine').select('id,naziv,drzava,aktivan').eq('aktivan', true);
 
@@ -835,11 +841,8 @@ async function loadAdminDashboard() {
   const predano = narudzbe?.filter(n => n.status === 'predano').length || 0;
   const aktivnih = sveTrgovine?.filter(t => t.aktivan).length || 0;
 
-  $('dashMetrics').innerHTML = `
-    <div class="metric"><div class="metric-label">Ukupno narudžbi</div><div class="metric-value">${total}</div><div class="metric-sub">od ${aktivnih} poslovnica</div></div>
-    <div class="metric"><div class="metric-label">Predano</div><div class="metric-value">${predano}</div><div class="metric-sub">${total - predano} u nacrtu</div></div>
-    <div class="metric"><div class="metric-label">Deadline</div><div class="metric-value" style="font-size:15px">${fmtDate(activePeriod.deadline_datum)}</div><div class="metric-sub">${activePeriod.deadline_vrijeme?.substring(0,5)}</div></div>
-    <div class="metric"><div class="metric-label">Aktivnih poslovnica</div><div class="metric-value">${aktivnih}</div></div>`;
+  // Metrike uklonjene po zahtjevu — info je u karticama po državama
+  $('dashMetrics').innerHTML = '';
 
   const drzave = ['HR','BA','SI','RS'];
   const drzaveNazivi = {HR:'Hrvatska',BA:'Bosna i Hercegovina',SI:'Slovenija',RS:'Srbija'};
@@ -868,7 +871,8 @@ async function loadAdminDashboard() {
   $('dashStateCards').innerHTML = cardsHtml;
 
   // Posljednje narudžbe
-  const recent = (narudzbe || []).sort((a,b) => new Date(b.updated_at) - new Date(a.updated_at)).slice(0,10);
+  console.log('Dashboard narudzbe:', narudzbe?.length, narudzbe);
+  const recent = (narudzbe || []).sort((a,b) => new Date(b.updated_at||b.created_at||0) - new Date(a.updated_at||a.created_at||0)).slice(0,10);
   if (!recent.length) {
     $('dashRecentOrders').innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div>Nema narudžbi za ovaj period.</div>';
     return;
