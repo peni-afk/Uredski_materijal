@@ -814,11 +814,12 @@ async function initApp(user) {
   $('loginPage').style.display = 'none';
   $('appShell').style.display = 'flex';
 
-  // Postavi avatar i ime
+  // Postavi ime u topbar
   const displayName = userRole === 'admin' ? 'Administrator' : user.email;
-  const initials = displayName.substring(0,2).toUpperCase();
-  $('userAvatar').textContent = initials;
-  $('userEmail').textContent = displayName;
+  $('userEmail').innerHTML = userRole === 'admin' 
+      ? `<span class="fw-bold">Administrator</span> <span style="opacity:0.7;font-size:11px">${escHtml(user.email)}</span>`
+      : escHtml(user.email);
+  $('userEmail').dataset.email = user.email;
 
   // Dohvati aktivan period (maybeSingle = null ako nema, bez crash-a)
   const { data: period } = await sb.from('period_settings').select('*').eq('aktivan', true).maybeSingle();
@@ -1238,13 +1239,13 @@ async function saveArtikl() {
     aktivan: $('artAktivan').checked,
   };
 
-  if (!payload.sifra || !payload.naziv) { alert('Šifra i naziv su obavezni!'); return; }
+  if (!payload.sifra || !payload.naziv) { showAlert('Upozorenje', 'Šifra i naziv su obavezni!', 'warning'); return; }
 
   const { error } = editingArtiklId
     ? await sb.from('artikli').update(payload).eq('id', editingArtiklId)
     : await sb.from('artikli').insert(payload);
 
-  if (error) { alert('Greška: ' + error.message); return; }
+  if (error) { showAlert('Greška', error.message, 'error'); return; }
   closeModal('artiklModal');
   loadArtikli();
 }
@@ -1358,12 +1359,12 @@ async function saveTrgovina() {
     aktivan: true,
   };
 
-  if (!payload.naziv || !payload.email) { alert('Naziv i email su obavezni!'); return; }
+  if (!payload.naziv || !payload.email) { showAlert('Upozorenje', 'Naziv i email su obavezni!', 'warning'); return; }
 
   if (!editingTrgovinaId) {
     // Nova poslovnica — korak 1: kreiraj zapis u trgovine (bez user_id)
     const pass = $('trPassword').value;
-    if (!pass || pass.length < 6) { alert('Lozinka mora imati najmanje 6 znakova!'); return; }
+    if (!pass || pass.length < 6) { showAlert('Upozorenje', 'Lozinka mora imati najmanje 6 znakova!', 'warning'); return; }
 
     // Kreiraj trgovinu u bazi
     const { data: novaTrgovina, error: trErr } = await sb
@@ -1372,7 +1373,7 @@ async function saveTrgovina() {
       .select()
       .single();
 
-    if (trErr) { alert('Greška pri kreiranju poslovnice: ' + trErr.message); return; }
+    if (trErr) { showAlert('Greška', 'Greška pri kreiranju poslovnice: ' + trErr.message, 'error'); return; }
 
     // Korak 2: Kreiraj auth usera kroz Edge Function (sigurno, serverski)
     const { data: sessionData } = await sb.auth.getSession();
@@ -1414,7 +1415,7 @@ async function saveTrgovina() {
   } else {
     // Uredi postojeću
     const { error } = await sb.from('trgovine').update(payload).eq('id', editingTrgovinaId);
-    if (error) { alert('Greška: ' + error.message); return; }
+    if (error) { showAlert('Greška', error.message, 'error'); return; }
     
     // Promjena lozinke ako je unesena - preko Edge Function
     const novaLoz = $('trNovaLozinka')?.value?.trim();
@@ -1441,7 +1442,7 @@ async function saveTrgovina() {
           const result = await response.json();
           
           if (!response.ok || !result.success) {
-            alert('Podaci poslovnice ažurirani.\n\n⚠️ Lozinka nije promijenjena: ' + (result.error || 'Greška'));
+            showAlert('Upozorenje', 'Podaci poslovnice ažurirani ali lozinka nije promijenjena: ' + (result.error || 'Greška'), 'warning');
           } else {
             closeModal('trgovinaModal');
             loadTrgovine();
@@ -1449,7 +1450,7 @@ async function saveTrgovina() {
             return;
           }
         } catch (fetchErr) {
-          alert('Podaci ažurirani. Greška pri promjeni lozinke: ' + fetchErr.message);
+          showAlert('Upozorenje', 'Podaci ažurirani. Greška pri promjeni lozinke: ' + fetchErr.message, 'warning');
         }
       }
     }
@@ -1468,7 +1469,7 @@ async function toggleTrgovina(id, trenutnoAktivan) {
 
 async function deleteTrgovina(id, naziv) {
   if (!confirm(`⚠️ TRAJNO obrisati poslovnicu "${naziv}"?\n\nOvo će obrisati:\n- Poslovnicu iz baze\n- Korisnički račun\n- Sve narudžbe i stavke\n\nOvu akciju NIJE moguće poništiti!`)) return;
-  if (!confirm(`Posljednja potvrda: zaista obrisati "${naziv}"?`)) return;
+  if (!(await showConfirm('Potvrda', `Zaista obrisati "${naziv}"?`))) return;
   
   // Dohvati user_id
   const { data: tr } = await sb.from('trgovine').select('user_id').eq('id', id).maybeSingle();
@@ -1562,7 +1563,7 @@ async function savePeriod() {
 
   // Kreiraj novi
   const { error } = await sb.from('period_settings').insert(payload);
-  if (error) { alert('Greška: ' + error.message); return; }
+  if (error) { showAlert('Greška', error.message, 'error'); return; }
 
   // Osvježi globalni period
   activePeriod = payload;
@@ -2099,10 +2100,20 @@ function calcTotal() {
   const extraList = $('extraItemsList');
   if (extraList) {
     extraList.querySelectorAll('tr.extra-row').forEach(row => {
-      const nums = row.querySelectorAll('input[type="number"]');
-      const cij = Math.max(0, parseFloat(nums[0]?.value || 0));
-      const kol = Math.max(0, parseInt(nums[1]?.value || 0));
-      total += cij * kol;
+      if (row.dataset.type === 'selected') {
+        // Artikl s liste
+        const cijena = parseFloat(row.dataset.cijena || 0);
+        const kol = Math.max(0, parseInt(row.querySelector('.qty-input')?.value || 0));
+        total += cijena * kol;
+      } else if (row.dataset.type === 'list') {
+        // Dropdown koji nije odabran — skip
+      } else {
+        // Slobodan unos
+        const nums = row.querySelectorAll('input[type="number"]');
+        const cij = Math.max(0, parseFloat(nums[0]?.value || 0));
+        const kol = Math.max(0, parseInt(nums[1]?.value || 0));
+        total += cij * kol;
+      }
     });
   }
   return Math.max(0, total);
@@ -2122,6 +2133,75 @@ function updateTotalBar() {
   if (grandTotal) grandTotal.textContent = `${ukupno.toFixed(2)} ${cur}`;
   if (progressFill) { progressFill.style.width = `${progress}%`; progressFill.className = `progress-fill ${progressClass}`; }
   if (progressPct) progressPct.textContent = `${Math.round(progress)}%`;
+}
+
+async function addExtraFromList() {
+  // Učitaj artikle ako nisu cached
+  if (!dopunaArtikli.length) await loadDopunaArtikli();
+  
+  const list = $('extraItemsList');
+  if (!list) return;
+  
+  const drzava = userTrgovina?.drzava || 'HR';
+  const cijenaKey = {HR:'cijena_hr',BA:'cijena_ba',SI:'cijena_si',RS:'cijena_rs'}[drzava] || 'cijena_hr';
+  
+  const options = dopunaArtikli.map(a => 
+    `<option value="${a.id}" data-sifra="${escHtml(a.sifra)}" data-naziv="${escHtml(a.naziv)}" data-pakiranje="${escHtml(a.pakiranje||'')}" data-cijena="${a[cijenaKey]||0}" data-max="${a.max_kolicina||999}">${a.sifra} — ${a.naziv}</option>`
+  ).join('');
+  
+  const html = `<tr class="extra-row extra-list-row" data-type="list">
+    <td colspan="8" style="padding:8px">
+      <div style="display:flex;gap:8px;align-items:center">
+        <select class="form-input" style="flex:1;padding:7px 10px;font-size:12px;border:1.5px solid var(--jbr);border-radius:4px;font-family:'Inter','Verdana',sans-serif" onchange="onExtraListSelect(this)">
+          <option value="">— Odaberi artikl —</option>
+          ${options}
+        </select>
+        <button class="btn btn-danger btn-sm" onclick="this.closest('tr').remove();updateTotalBar()">✕</button>
+      </div>
+    </td>
+  </tr>`;
+  
+  list.insertAdjacentHTML('beforeend', html);
+}
+
+function onExtraListSelect(select) {
+  const row = select.closest('tr');
+  const opt = select.options[select.selectedIndex];
+  if (!opt || !opt.value) return;
+  
+  const sifra = opt.dataset.sifra;
+  const naziv = opt.dataset.naziv;
+  const pakiranje = opt.dataset.pakiranje || '—';
+  const cijena = parseFloat(opt.dataset.cijena) || 0;
+  const max = parseInt(opt.dataset.max) || 999;
+  
+  row.dataset.type = 'selected';
+  row.dataset.artiklId = opt.value;
+  row.dataset.cijena = cijena;
+  row.classList.remove('extra-list-row');
+  row.innerHTML = `
+    <td class="text-center" style="font-size:11px;color:var(--jm)">${escHtml(sifra)}</td>
+    <td class="fw-bold">${escHtml(naziv)}</td>
+    <td class="text-center" style="font-size:11px;color:var(--jm)">${escHtml(pakiranje)}</td>
+    <td class="text-center">${cijena.toFixed(2)}</td>
+    <td class="text-center">
+      <input type="number" min="1" max="${max}" value="1" class="qty-input" autocomplete="off"
+        oninput="recalcExtraListRow(this);updateTotalBar()" onfocus="this.select()">
+    </td>
+    <td class="text-center" style="font-size:11px;color:var(--jm)">${max}</td>
+    <td class="text-center fw-bold extra-list-total">${cijena.toFixed(2)}</td>
+    <td class="text-center"><button class="btn btn-danger btn-sm" onclick="this.closest('tr').remove();updateTotalBar()">✕</button></td>`;
+  
+  updateTotalBar();
+}
+
+function recalcExtraListRow(input) {
+  const row = input.closest('tr');
+  if (!row) return;
+  const cijena = parseFloat(row.dataset.cijena || 0);
+  const kol = Math.max(0, parseInt(input.value || 0));
+  const cell = row.querySelector('.extra-list-total');
+  if (cell) cell.textContent = (cijena * kol).toFixed(2);
 }
 
 function addExtraItem() {
@@ -2268,18 +2348,34 @@ async function persistOrder(status) {
   const extraList = $('extraItemsList');
   if (extraList) {
     extraList.querySelectorAll('tr.extra-row').forEach(row => {
-      const nazEl = row.querySelector('input[type="text"]');
-      const nums = row.querySelectorAll('input[type="number"]');
-      const naziv = nazEl?.value?.trim();
-      const cijena = parseFloat(nums[0]?.value || 0);
-      const kolicina = parseInt(nums[1]?.value || 1);
-      if (naziv && cijena > 0 && kolicina > 0) {
-        noveStavke.push({
-          narudzba_id: storeOrderId,
-          extra_naziv: naziv,
-          kolicina,
-          cijena,
-        });
+      if (row.dataset.type === 'selected') {
+        // Artikl s liste
+        const artiklId = parseInt(row.dataset.artiklId);
+        const cijena = parseFloat(row.dataset.cijena || 0);
+        const kol = parseInt(row.querySelector('.qty-input')?.value || 0);
+        if (artiklId && cijena > 0 && kol > 0) {
+          noveStavke.push({
+            narudzba_id: storeOrderId,
+            artikl_id: artiklId,
+            kolicina: kol,
+            cijena,
+          });
+        }
+      } else if (row.dataset.type !== 'list') {
+        // Slobodan unos
+        const nazEl = row.querySelector('input[type="text"]');
+        const nums = row.querySelectorAll('input[type="number"]');
+        const naziv = nazEl?.value?.trim();
+        const cijena = Math.max(0, parseFloat(nums[0]?.value || 0));
+        const kolicina = Math.max(1, parseInt(nums[1]?.value || 1));
+        if (naziv && cijena > 0 && kolicina > 0) {
+          noveStavke.push({
+            narudzba_id: storeOrderId,
+            extra_naziv: naziv,
+            kolicina,
+            cijena,
+          });
+        }
       }
     });
   }
@@ -2398,7 +2494,7 @@ async function editPeriodDeadline(periodId, currentDate, currentTime) {
     deadline_vrijeme: newTime + ':00'
   }).eq('id', periodId);
   
-  if (error) { alert('Greška: ' + error.message); return; }
+  if (error) { showAlert('Greška', error.message, 'error'); return; }
   
   // Osvježi globalni period
   const { data: p } = await sb.from('period_settings').select('*').eq('aktivan', true).maybeSingle();
