@@ -173,11 +173,16 @@ tr:hover td{background:var(--jbgl)}
 .filter-btn{padding:8px 16px;background:white;border:1.5px solid var(--jbr)!important;color:var(--jm);font-size:11px;border-radius:4px}
 .filter-btn:hover{background:var(--jbg);color:var(--jb)}
 .filter-btn.active{background:var(--jb)!important;color:white!important;border-color:var(--jb)!important}
-.state-metrics{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:10px 0}
-.state-metric{display:flex;justify-content:space-between;font-size:11px;padding:4px 0;border-bottom:1px solid var(--jbr)}
-.state-metric:last-child{border-bottom:none}
-.state-metric-label{color:var(--jm)}
-.state-metric-value{font-weight:700;color:var(--jt)}
+.state-card{border-radius:10px;box-shadow:0 1px 3px rgba(14,45,107,0.08)}
+.state-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.state-card-title{font-size:14px;font-weight:700;color:var(--jt)}
+.state-stats{display:flex;flex-direction:column;gap:7px}
+.state-stat-row{display:flex;justify-content:space-between;font-size:12px;color:var(--jm)}
+.state-stat-row .fw-bold{color:var(--jt)}
+.state-progress .progress-bar{height:5px;background:var(--jbr);border-radius:3px;overflow:hidden}
+.state-progress .progress-fill{height:100%;background:var(--jb);border-radius:3px;transition:width 0.4s}
+.dl-btn{border-radius:7px;background:var(--jbg);border-color:var(--jbg)}
+.dl-btn:hover{background:var(--jb);color:white;border-color:var(--jb)}
 
 /* ── ORDER TABLE ── */
 .order-table{width:100%;border-collapse:collapse;font-size:12px}
@@ -320,7 +325,7 @@ thead th{color:white!important;background:var(--jb)!important;border-bottom:none
           <div class="loading">Učitavanje...</div>
         </div>
         <div class="card">
-          <div class="card-title">Posljednje narudžbe</div>
+    
           <div id="dashRecentOrders"><div class="loading">Učitavanje...</div></div>
         </div>
       </div>
@@ -855,17 +860,28 @@ async function loadAdminDashboard() {
     const dUkupno = dNar.reduce((s,n) => s + (parseFloat(n.ukupni_iznos)||0), 0);
     const dTrg = sveTrgovine?.filter(t => t.drzava === drzava).length || 0;
     const cur = valuta[drzava] || '';
+    const predPct = dTrg > 0 ? Math.round((dPred.length / dTrg) * 100) : 0;
+    const predWidth = dTrg > 0 ? Math.round((dPred.length / dTrg) * 100) : 0;
 
     cardsHtml += `
       <div class="state-card">
-        <div class="state-card-name">${drzaveNazivi[drzava]} ${getBadgeDrzava(drzava)}</div>
-        <div class="state-metrics">
-          <div class="state-metric"><span class="state-metric-label">Poslovnica</span><span class="state-metric-value">${dTrg}</span></div>
-          <div class="state-metric"><span class="state-metric-label">Narudžbi</span><span class="state-metric-value">${dNar.length} / ${dTrg}</span></div>
-          <div class="state-metric"><span class="state-metric-label">Predano</span><span class="state-metric-value">${dPred.length}</span></div>
-          <div class="state-metric"><span class="state-metric-label">Ukupno</span><span class="state-metric-value">${dUkupno.toFixed(2)} ${cur}</span></div>
+        <div class="state-card-header">
+          <span class="state-card-title">${drzaveNazivi[drzava]}</span>
+          ${getBadgeDrzava(drzava)}
         </div>
-        <button class="dl-btn" onclick="exportExcel('${drzava}')" id="dlBtn${drzava}">⬇ Preuzmi Excel ${drzava}</button>
+        <div class="state-stats">
+          <div class="state-stat-row"><span>Poslovnica</span><span class="fw-bold">${dTrg}</span></div>
+          <div class="state-stat-row"><span>Narudžbi</span><span class="fw-bold">${dNar.length} / ${dTrg}</span></div>
+          <div class="state-stat-row"><span>Predano</span><span class="fw-bold">${dPred.length}</span></div>
+          <div class="state-stat-row"><span>Ukupno</span><span class="fw-bold">${dUkupno.toFixed(2)} ${cur}</span></div>
+        </div>
+        <div class="state-progress">
+          <div class="progress-bar" style="margin-top:12px"><div class="progress-fill" style="width:${predWidth}%"></div></div>
+          <div style="text-align:right;font-size:10px;color:var(--jm);margin-top:4px">${predPct}% predano</div>
+        </div>
+        <button class="dl-btn" onclick="exportExcel('${drzava}')" id="dlBtn${drzava}">
+          <span style="font-size:13px">↓</span> Preuzmi Excel ${drzava}
+        </button>
       </div>`;
   }
   $('dashStateCards').innerHTML = cardsHtml;
@@ -877,7 +893,8 @@ async function loadAdminDashboard() {
     $('dashRecentOrders').innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div>Nema narudžbi za ovaj period.</div>';
     return;
   }
-  let html = `<table><thead><tr><th>Poslovnica</th><th>Država</th><th>Iznos</th><th>Status</th><th>Datum</th></tr></thead><tbody>`;
+  let html = `<div class="card-header"><div class="card-title">Posljednje narudžbe</div><div style="font-size:11px;color:var(--jm)">Aktivni period</div></div>
+    <table><thead><tr><th>Poslovnica ↕</th><th>Država ↕</th><th>Iznos ↕</th><th>Status ↕</th><th>Datum ↕</th></tr></thead><tbody>`;
   for (const n of recent) {
     const cur = valuta[n.trgovine?.drzava] || '';
     html += `<tr>
@@ -1742,13 +1759,14 @@ function renderOrderReadonly(narudzba, stavke, artikli) {
 
   let stavkeHtml = '';
   for (const s of stavke) {
+    const rowTotal = (parseFloat(s.kolicina||0) * parseFloat(s.cijena||0)).toFixed(2);
     stavkeHtml += `<tr>
       <td>${escHtml(s.artikli?.sifra || 'EXTRA')}</td>
       <td>${escHtml(s.artikli?.naziv || s.extra_naziv || '')}</td>
-      <td style="font-size:11px;color:var(--jm)">${escHtml(s.artikli?.pakiranje || '—')}</td>
+      <td class="text-center" style="font-size:11px;color:var(--jm)">${escHtml(s.artikli?.pakiranje || '—')}</td>
       <td class="text-center">${s.kolicina}</td>
       <td class="text-right">${parseFloat(s.cijena||0).toFixed(2)} ${cur}</td>
-      <td class="text-right fw-bold">${parseFloat(s.ukupno||0).toFixed(2)} ${cur}</td>
+      <td class="text-right fw-bold">${rowTotal} ${cur}</td>
     </tr>`;
   }
 
