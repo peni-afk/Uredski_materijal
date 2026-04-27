@@ -410,6 +410,19 @@ thead th{color:white!important;background:var(--jb)!important;border-bottom:none
         <div id="periodContent"><div class="loading">Učitavanje...</div></div>
       </div>
 
+      <!-- ══ ADMIN: LOGOVI ══ -->
+      <div class="page" id="page-admin-logovi">
+        <div class="page-header">
+          <div>
+            <div class="page-title">Aktivnosti</div>
+            <div class="page-sub">Pregled svih akcija u sustavu</div>
+          </div>
+        </div>
+        <div class="card">
+          <div id="logoviTable"><div class="loading">Učitavanje...</div></div>
+        </div>
+      </div>
+
       <!-- ══ STORE: DASHBOARD ══ -->
       <div class="page" id="page-store-dashboard">
         <div class="page-header">
@@ -790,6 +803,9 @@ function renderSidebar() {
     </div>
     <div class="nav-item" onclick="navTo('admin-period', this)">
       <span class="nav-icon">${icCalendar}</span> Period
+    </div>
+    <div class="nav-item" onclick="navTo('admin-logovi', this)">
+      <span class="nav-icon"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 3h12v12H3z" stroke="currentColor" stroke-width="1.6" rx="2"/><path d="M6 7h6M6 10h4M6 13h2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></span> Logovi
     </div>`;
 
   const icHome = '<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M2 8l7-6 7 6v8a1 1 0 01-1 1H3a1 1 0 01-1-1V8z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>';
@@ -821,6 +837,7 @@ function navTo(page, el) {
   if (page === 'admin-artikli') loadArtikli();
   if (page === 'admin-trgovine') loadTrgovine();
   if (page === 'admin-period') loadPeriod();
+  if (page === 'admin-logovi') loadLogovi();
   if (page === 'store-narudzba') loadStoreOrder();
   if (page === 'store-povijest') loadStorePovijest();
 }
@@ -905,7 +922,13 @@ async function loadAdminDashboard() {
     return;
   }
   let html = `<div class="card-header"><div class="card-title">Posljednje narudžbe</div><div style="font-size:11px;color:var(--jm)">Aktivni period</div></div>
-    <table><thead><tr><th>Poslovnica <span style="opacity:0.5;font-size:9px">↕</span></th><th>Država <span style="opacity:0.5;font-size:9px">↕</span></th><th>Iznos <span style="opacity:0.5;font-size:9px">↕</span></th><th>Status <span style="opacity:0.5;font-size:9px">↕</span></th><th>Datum <span style="opacity:0.5;font-size:9px">↕</span></th></tr></thead><tbody>`;
+    <table id="tblDashNarudzbe"><thead><tr>
+      <th>Poslovnica ${sortHeader(0,'str')}</th>
+      <th>Država ${sortHeader(1,'str')}</th>
+      <th>Iznos ${sortHeader(2,'num')}</th>
+      <th>Status ${sortHeader(3,'str')}</th>
+      <th>Datum ${sortHeader(4,'str')}</th>
+    </tr></thead><tbody>`;
   for (const n of recent) {
     const cur = valuta[n.trgovine?.drzava] || '';
     html += `<tr>
@@ -1000,12 +1023,13 @@ async function viewNarudzba(narudzbaId) {
       <th>Artikl</th><th>Šifra</th><th>Kol.</th><th>Cijena</th><th>Ukupno</th>
     </tr></thead><tbody>`;
     for (const s of stavke) {
-      stavkeHtml += `<tr>
+      const sTotal = (parseFloat(s.kolicina||0) * parseFloat(s.cijena||0)).toFixed(2);
+    stavkeHtml += `<tr>
         <td>${escHtml(s.artikli?.naziv || s.extra_naziv || '—')}</td>
         <td class="text-muted">${escHtml(s.artikli?.sifra || 'EXTRA')}</td>
         <td class="text-center">${s.kolicina}</td>
         <td class="text-right">${parseFloat(s.cijena||0).toFixed(2)} ${cur}</td>
-        <td class="text-right fw-bold">${parseFloat(s.ukupno||0).toFixed(2)} ${cur}</td>
+        <td class="text-right fw-bold">${sTotal} ${cur}</td>
       </tr>`;
     }
     stavkeHtml += `<tr>
@@ -1767,6 +1791,9 @@ async function loadStoreOrder() {
 function renderOrderReadonly(narudzba, stavke, artikli) {
   const valuta = {HR:'EUR',BA:'KM',SI:'EUR',RS:'RSD'};
   const cur = valuta[userTrgovina.drzava] || '';
+  
+  // Provjeri je li deadline još aktivan
+  const deadlinePassed = activePeriod ? new Date() > new Date(`${activePeriod.deadline_datum}T${activePeriod.deadline_vrijeme}`) : true;
 
   let stavkeHtml = '';
   for (const s of stavke) {
@@ -1781,11 +1808,26 @@ function renderOrderReadonly(narudzba, stavke, artikli) {
     </tr>`;
   }
 
+  const dopunaHtml = deadlinePassed ? '' : `
+    <div class="card" style="border:2px solid var(--jb);margin-top:16px">
+      <div class="card-title" style="color:var(--jb)">📝 Dopuna narudžbe</div>
+      <p style="font-size:12px;color:var(--jm);margin-bottom:12px">Rok za predaju još nije istekao. Možete dodati artikle koje ste zaboravili.</p>
+      <div id="dopunaItems"></div>
+      <button class="btn btn-secondary" onclick="addDopunaItem()" style="margin-top:8px">+ Dodaj artikl</button>
+      <div style="margin-top:12px">
+        <textarea id="dopunaNapomena" placeholder="Napomena za admina..." autocomplete="off"
+          style="width:100%;padding:9px;border:1.5px solid var(--jbr);border-radius:4px;font-family:Inter,Verdana,sans-serif;font-size:12px;resize:vertical;min-height:50px"></textarea>
+      </div>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn btn-primary" onclick="submitDopuna(${narudzba.id})">📩 Pošalji dopunu adminu</button>
+      </div>
+    </div>`;
+
   $('storeOrderContent').innerHTML = `
-    <div class="alert alert-success">✅ Narudžba je predana i zaključana. Kontaktirajte admina ako trebate izmjene.</div>
+    <div class="alert alert-success">✅ Narudžba je predana.${deadlinePassed ? ' Rok je istekao.' : ' Rok još traje — možete poslati dopunu.'}</div>
     <div class="card">
-      <div class="card-title">Narudžba — ${escHtml(activePeriod.mjesec)}</div>
-      <table class="order-items-table"><thead><tr>
+      <div class="card-title">Narudžba — ${escHtml(activePeriod?.mjesec || '')}</div>
+      <table class="order-table" id="tblReadonly"><thead><tr>
         <th>Šifra</th><th>Artikl</th><th>Pakiranje</th><th>Kol.</th><th>Cijena</th><th>Ukupno</th>
       </tr></thead><tbody>${stavkeHtml}</tbody></table>
       <div class="order-total" style="margin-top:14px">
@@ -1793,7 +1835,8 @@ function renderOrderReadonly(narudzba, stavke, artikli) {
         <div class="order-total-amount">${parseFloat(narudzba.ukupni_iznos||0).toFixed(2)} ${cur}</div>
       </div>
       ${narudzba.napomena ? `<div class="alert alert-info" style="margin-top:12px"><strong>Napomena:</strong> ${escHtml(narudzba.napomena)}</div>` : ''}
-    </div>`;
+    </div>
+    ${dopunaHtml}`;
 }
 
 function renderOrderForm(narudzba, artikli) {
@@ -2015,6 +2058,16 @@ function removeExtra(idx) {
 
 async function saveOrderDraft() {
   await persistOrder('nacrt');
+  // Logiraj nacrt
+  await sb.from('audit_log').insert({
+    user_email: currentUser?.email || '',
+    user_role: userRole || 'store',
+    akcija: 'SPREMI_NACRT',
+    entitet: 'narudzbe',
+    entitet_id: storeOrderId,
+    detalji: { ukupni_iznos: calcTotal() }
+  }).then(() => {}).catch(() => {});
+  
   alert('✅ Nacrt je spremljen!');
 }
 
@@ -2040,6 +2093,16 @@ async function submitOrder() {
   }
 
   await persistOrder('predano');
+  // Logiraj predaju
+  await sb.from('audit_log').insert({
+    user_email: currentUser?.email || '',
+    user_role: userRole || 'store',
+    akcija: 'PREDAJA_NARUDZBE',
+    entitet: 'narudzbe',
+    entitet_id: storeOrderId,
+    detalji: { ukupni_iznos: ukupno }
+  }).then(() => {}).catch(() => {});
+  
   alert('✅ Narudžba je uspješno predana!');
   loadStoreDashboard();
   showPage('store-dashboard');
@@ -2213,11 +2276,191 @@ async function editPeriodDeadline(periodId, currentDate, currentTime) {
   loadPeriod();
 }
 
+function addDopunaItem() {
+  const list = $('dopunaItems');
+  if (!list) return;
+  const idx = list.children.length;
+  const valuta = {HR:'EUR',BA:'KM',SI:'EUR',RS:'RSD'};
+  const cur = valuta[userTrgovina?.drzava] || '';
+  
+  const html = `<div class="extra-item-row" style="display:flex;gap:8px;align-items:center;margin-bottom:8px" id="dopunaRow${idx}">
+    <input type="text" placeholder="Naziv artikla" autocomplete="off" style="flex:2;padding:7px 10px;border:1.5px solid var(--jbr);border-radius:4px;font-size:12px;font-family:Inter,Verdana,sans-serif">
+    <input type="number" placeholder="Cijena" step="0.01" min="0" autocomplete="off" style="width:90px;padding:7px 10px;border:1.5px solid var(--jbr);border-radius:4px;font-size:12px;text-align:center;font-family:Inter,Verdana,sans-serif">
+    <input type="number" placeholder="Kol." min="1" value="1" autocomplete="off" style="width:70px;padding:7px 10px;border:1.5px solid var(--jbr);border-radius:4px;font-size:12px;text-align:center;font-family:Inter,Verdana,sans-serif">
+    <button class="btn btn-danger btn-sm" onclick="this.closest('.extra-item-row').remove()">✕</button>
+  </div>`;
+  
+  list.insertAdjacentHTML('beforeend', html);
+}
+
+async function submitDopuna(narudzbaId) {
+  const list = $('dopunaItems');
+  if (!list) return;
+  
+  const rows = list.querySelectorAll('.extra-item-row');
+  const napomena = $('dopunaNapomena')?.value?.trim() || '';
+  
+  if (rows.length === 0 && !napomena) {
+    alert('Dodajte barem jedan artikl ili napomenu.');
+    return;
+  }
+  
+  const noveStavke = [];
+  rows.forEach(row => {
+    const inputs = row.querySelectorAll('input');
+    const naziv = inputs[0]?.value?.trim();
+    const cijena = Math.max(0, parseFloat(inputs[1]?.value || 0));
+    const kolicina = Math.max(1, parseInt(inputs[2]?.value || 1));
+    if (naziv && cijena > 0) {
+      noveStavke.push({
+        narudzba_id: narudzbaId,
+        extra_naziv: '[DOPUNA] ' + naziv,
+        kolicina,
+        cijena,
+      });
+    }
+  });
+  
+  // Dodaj nove stavke
+  if (noveStavke.length) {
+    const { error: stavkeErr } = await sb.from('stavke_narudzbe').insert(noveStavke);
+    if (stavkeErr) {
+      alert('Greška pri dodavanju stavki: ' + stavkeErr.message);
+      return;
+    }
+  }
+  
+  // Ažuriraj ukupni iznos i napomenu
+  const { data: sveStavke } = await sb.from('stavke_narudzbe').select('kolicina, cijena').eq('narudzba_id', narudzbaId);
+  const noviUkupno = (sveStavke || []).reduce((s, st) => s + (parseFloat(st.kolicina||0) * parseFloat(st.cijena||0)), 0);
+  
+  const oldNapomena = (await sb.from('narudzbe').select('napomena').eq('id', narudzbaId).maybeSingle())?.data?.napomena || '';
+  const novaNapomena = napomena ? (oldNapomena ? oldNapomena + '\n[DOPUNA] ' + napomena : '[DOPUNA] ' + napomena) : oldNapomena;
+  
+  await sb.from('narudzbe').update({
+    ukupni_iznos: noviUkupno,
+    napomena: novaNapomena || null,
+  }).eq('id', narudzbaId);
+  
+  // Logiraj dopunu
+  await sb.from('audit_log').insert({
+    user_email: currentUser?.email || '',
+    user_role: userRole || 'store',
+    akcija: 'DOPUNA_NARUDZBE',
+    entitet: 'narudzbe',
+    entitet_id: narudzbaId,
+    detalji: { stavke: noveStavke.length, napomena: napomena || null }
+  });
+  
+  alert('✅ Dopuna poslana! Administrator će vidjeti dodane artikle označene s [DOPUNA].');
+  loadStoreOrder();
+}
+
+async function loadLogovi() {
+  const { data: logs, error } = await sb.from('audit_log').select('*').order('created_at', { ascending: false }).limit(100);
+  
+  if (error || !logs?.length) {
+    $('logoviTable').innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div>Nema zapisa u logu.</div>';
+    return;
+  }
+  
+  let html = `<table id="tblLogovi"><thead><tr>
+    <th>Datum ${sortHeader(0,'str')}</th>
+    <th>Korisnik ${sortHeader(1,'str')}</th>
+    <th>Rola ${sortHeader(2,'str')}</th>
+    <th>Akcija ${sortHeader(3,'str')}</th>
+    <th>Entitet</th>
+    <th>Detalji</th>
+  </tr></thead><tbody>`;
+  
+  const akcijaLabels = {
+    'PREDAJA_NARUDZBE': '<span class="badge badge-ok">Predano</span>',
+    'SPREMI_NACRT': '<span class="badge badge-draft">Nacrt</span>',
+    'DOPUNA_NARUDZBE': '<span class="badge" style="background:#fff3cd;color:#856404;border-radius:20px;padding:4px 10px">Dopuna</span>',
+  };
+  
+  for (const l of logs) {
+    const datum = new Date(l.created_at).toLocaleString('hr-HR', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+    const detalji = l.detalji ? JSON.stringify(l.detalji).substring(0, 80) : '—';
+    html += `<tr>
+      <td class="text-muted" style="white-space:nowrap">${datum}</td>
+      <td class="fw-bold">${escHtml(l.user_email || '—')}</td>
+      <td>${l.user_role === 'admin' ? '<span class="badge badge-ok">Admin</span>' : '<span class="badge badge-draft">Store</span>'}</td>
+      <td>${akcijaLabels[l.akcija] || escHtml(l.akcija)}</td>
+      <td class="text-muted">${escHtml(l.entitet || '')} #${l.entitet_id || ''}</td>
+      <td class="text-muted" style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(detalji)}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  $('logoviTable').innerHTML = html;
+}
+
 function setDrzavaFilter(val, btn) {
   $('filterDrzava').value = val;
   document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   loadAdminNarudzbe();
+}
+
+// ═══════════════════════════════════════════════════════
+// TABLE SORTING
+// ═══════════════════════════════════════════════════════
+let currentSort = { field: null, dir: 'asc' };
+
+function sortTable(tableId, field, type) {
+  const table = document.getElementById(tableId);
+  if (!table) return;
+  const tbody = table.querySelector('tbody');
+  if (!tbody) return;
+  
+  // Toggle direction
+  if (currentSort.field === field) {
+    currentSort.dir = currentSort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    currentSort.field = field;
+    currentSort.dir = 'asc';
+  }
+  
+  const rows = Array.from(tbody.querySelectorAll('tr'));
+  
+  rows.sort((a, b) => {
+    const aCell = a.cells[field];
+    const bCell = b.cells[field];
+    if (!aCell || !bCell) return 0;
+    
+    let aVal = aCell.textContent.trim();
+    let bVal = bCell.textContent.trim();
+    
+    if (type === 'num') {
+      aVal = parseFloat(aVal.replace(/[^0-9.-]/g, '')) || 0;
+      bVal = parseFloat(bVal.replace(/[^0-9.-]/g, '')) || 0;
+      return currentSort.dir === 'asc' ? aVal - bVal : bVal - aVal;
+    }
+    
+    return currentSort.dir === 'asc' 
+      ? aVal.localeCompare(bVal, 'hr') 
+      : bVal.localeCompare(aVal, 'hr');
+  });
+  
+  rows.forEach(r => tbody.appendChild(r));
+  
+  // Update sort ikone
+  table.querySelectorAll('th .sort-icon').forEach(icon => {
+    icon.textContent = '↕';
+    icon.style.opacity = '0.3';
+  });
+  const activeHeader = table.querySelectorAll('th')[field];
+  if (activeHeader) {
+    const icon = activeHeader.querySelector('.sort-icon');
+    if (icon) {
+      icon.textContent = currentSort.dir === 'asc' ? '↑' : '↓';
+      icon.style.opacity = '1';
+    }
+  }
+}
+
+function sortHeader(colIdx, type) {
+  return `<span class="sort-icon" style="cursor:pointer;opacity:0.3;font-size:10px;margin-left:4px" onclick="sortTable(this.closest('table').id, ${colIdx}, '${type}')">↕</span>`;
 }
 
 function togglePasswordChange() {
