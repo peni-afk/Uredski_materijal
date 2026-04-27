@@ -813,10 +813,11 @@ async function initApp(user) {
   $('loginPage').style.display = 'none';
   $('appShell').style.display = 'flex';
 
-  // Postavi avatar i email
-  const initials = user.email.substring(0,2).toUpperCase();
+  // Postavi avatar i ime
+  const displayName = userRole === 'admin' ? 'Administrator' : user.email;
+  const initials = displayName.substring(0,2).toUpperCase();
   $('userAvatar').textContent = initials;
-  $('userEmail').textContent = user.email;
+  $('userEmail').textContent = displayName;
 
   // Dohvati aktivan period (maybeSingle = null ako nema, bez crash-a)
   const { data: period } = await sb.from('period_settings').select('*').eq('aktivan', true).maybeSingle();
