@@ -646,7 +646,7 @@ thead th{color:white!important;background:var(--jb)!important;border-bottom:none
   <div class="modal" style="max-width:700px">
     <div class="modal-title" id="narudzbaDetailTitle">Detalji narudžbe</div>
     <div id="narudzbaDetailContent"></div>
-    <div class="modal-actions">
+    <div class="modal-actions" id="narudzbaDetailActions">
       <button class="btn btn-secondary" onclick="closeModal('narudzbaDetailModal')">Zatvori</button>
     </div>
   </div>
@@ -705,6 +705,56 @@ function getCijenaByDrzava(artikl, drzava) {
 // ═══════════════════════════════════════════════════════
 // AUTH
 // ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
+// CUSTOM MODAL (zamjena za alert/confirm)
+// ═══════════════════════════════════════════════════════
+let _modalResolve = null;
+
+function showAlert(title, body, type = 'info') {
+  return new Promise(resolve => {
+    _modalResolve = resolve;
+    $('customAlertTitle').textContent = title;
+    $('customAlertBody').innerHTML = body;
+    $('customAlertInput').style.display = 'none';
+    const icons = {success:'✅', error:'❌', warning:'⚠️', info:'ℹ️'};
+    $('customAlertTitle').textContent = (icons[type]||'') + ' ' + title;
+    $('customAlertActions').innerHTML = `<button class="btn btn-primary" onclick="closeCustomModal(true)">U redu</button>`;
+    showModal('customAlertModal');
+  });
+}
+
+function showConfirm(title, body, confirmText = 'Da', cancelText = 'Odustani') {
+  return new Promise(resolve => {
+    _modalResolve = resolve;
+    $('customAlertTitle').textContent = title;
+    $('customAlertBody').innerHTML = body;
+    $('customAlertInput').style.display = 'none';
+    $('customAlertActions').innerHTML = `
+      <button class="btn btn-secondary" onclick="closeCustomModal(false)">${cancelText}</button>
+      <button class="btn btn-primary" onclick="closeCustomModal(true)">${confirmText}</button>`;
+    showModal('customAlertModal');
+  });
+}
+
+function showPromptModal(title, body, confirmText = 'Potvrdi') {
+  return new Promise(resolve => {
+    _modalResolve = resolve;
+    $('customAlertTitle').textContent = title;
+    $('customAlertBody').innerHTML = body;
+    $('customAlertInput').style.display = 'block';
+    $('customAlertTextarea').value = '';
+    $('customAlertActions').innerHTML = `
+      <button class="btn btn-secondary" onclick="closeCustomModal(null)">Odustani</button>
+      <button class="btn btn-primary" onclick="closeCustomModal($('customAlertTextarea').value.trim())">${confirmText}</button>`;
+    showModal('customAlertModal');
+  });
+}
+
+function closeCustomModal(value) {
+  closeModal('customAlertModal');
+  if (_modalResolve) { _modalResolve(value); _modalResolve = null; }
+}
+
 async function doLogin() {
   const email = $('loginEmail').value.trim();
   const pass  = $('loginPassword').value;
@@ -735,7 +785,7 @@ function showErr(msg) {
 }
 
 async function doLogout() {
-  if (!confirm('Jeste li sigurni da se želite odjaviti?')) return;
+  if (!(await showConfirm('Odjava', 'Jeste li sigurni da se želite odjaviti?', 'Odjavi se'))) return;
   await sb.auth.signOut();
   clearInterval(countdownInterval);
   currentUser = null; userRole = null; userTrgovina = null; activePeriod = null; storeOrderId = null;
@@ -1053,6 +1103,25 @@ async function viewNarudzba(narudzbaId) {
     ${n.napomena ? `<div class="alert alert-info" style="margin-bottom:12px"><strong>Napomena:</strong> ${escHtml(n.napomena)}</div>` : ''}
     <div class="card-title" style="margin-bottom:10px">Stavke narudžbe</div>
     ${stavkeHtml}`;
+
+  // Admin akcije za predane narudžbe
+  const actionsEl = $('narudzbaDetailActions');
+  if (userRole === 'admin' && n.status === 'predano') {
+    actionsEl.innerHTML = `
+      <button class="btn btn-secondary" onclick="closeModal('narudzbaDetailModal')">Zatvori</button>
+      <button class="btn" style="background:#f59e0b;color:white" onclick="vratiNaDoradu(${n.id}, '${escHtml(n.trgovine?.naziv||'')}')">🔄 Vrati na doradu</button>
+      <button class="btn btn-danger" style="background:var(--jda);color:white;border:none" onclick="ponistiNarudzbu(${n.id}, '${escHtml(n.trgovine?.naziv||'')}')">❌ Poništi</button>`;
+  } else if (userRole === 'admin' && n.status === 'nacrt') {
+    actionsEl.innerHTML = `
+      <button class="btn btn-secondary" onclick="closeModal('narudzbaDetailModal')">Zatvori</button>
+      <span style="font-size:12px;color:var(--jm)">Narudžba je u nacrtu — trgovina još editira.</span>`;
+  } else if (userRole === 'admin' && n.status === 'poništeno') {
+    actionsEl.innerHTML = `
+      <button class="btn btn-secondary" onclick="closeModal('narudzbaDetailModal')">Zatvori</button>
+      <span style="font-size:12px;color:var(--jda)">Narudžba je poništena.</span>`;
+  } else {
+    actionsEl.innerHTML = `<button class="btn btn-secondary" onclick="closeModal('narudzbaDetailModal')">Zatvori</button>`;
+  }
 
   showModal('narudzbaDetailModal');
 }
@@ -1594,6 +1663,29 @@ async function loadStoreDashboard() {
 
   // Countdown
   renderCountdown();
+  
+  // Provjeri ima li vraćenu narudžbu
+  if (activePeriod) {
+    const { data: vracena } = await sb.from('narudzbe')
+      .select('napomena, status')
+      .eq('trgovina_id', userTrgovina.id)
+      .eq('period_mjesec', activePeriod.mjesec)
+      .eq('period_godina', activePeriod.godina)
+      .eq('status', 'nacrt')
+      .maybeSingle();
+    
+    if (vracena?.napomena?.includes('[VRAĆENO NA DORADU]')) {
+      const razlog = vracena.napomena.replace('[VRAĆENO NA DORADU] ', '');
+      $('storeCountdown').insertAdjacentHTML('afterend', `
+        <div class="alert" style="background:#fff3cd;border:2px solid #f59e0b;color:#92400e;margin-bottom:16px;border-radius:8px;padding:16px">
+          <div style="font-weight:700;font-size:14px;margin-bottom:6px">⚠️ Narudžba vraćena na doradu!</div>
+          <div style="font-size:13px">Administrator je vratio vašu narudžbu. Razlog: <strong>${escHtml(razlog)}</strong></div>
+          <div style="margin-top:10px">
+            <button class="btn btn-primary btn-sm" onclick="navTo('store-narudzba', document.querySelectorAll('.nav-item')[1])">✏️ Uredi narudžbu</button>
+          </div>
+        </div>`);
+    }
+  }
 
   if (!activePeriod) {
     $('storeCurrentOrder').innerHTML = '<div class="alert alert-info">Trenutno nema aktivnog perioda naručivanja.</div>';
@@ -1613,7 +1705,7 @@ async function loadStoreDashboard() {
   const cur = valuta[userTrgovina.drzava] || '';
   const min = parseFloat(userTrgovina.minimalni_iznos || 0);
 
-  if (!narudzba) {
+  if (!narudzba || narudzba.status === 'poništeno') {
     $('storeCurrentOrder').innerHTML = `
       <div class="card">
         <div class="card-title">Narudžba za ${escHtml(activePeriod.mjesec)}</div>
@@ -1808,12 +1900,31 @@ function renderOrderReadonly(narudzba, stavke, artikli) {
     </tr>`;
   }
 
+  // Dohvati artikle za dropdown
+  const cijenaKolona = {HR:'cijena_hr',BA:'cijena_ba',SI:'cijena_si',RS:'cijena_rs'};
+  const cijenaCol = cijenaKolona[userTrgovina.drzava] || 'cijena_hr';
+
   const dopunaHtml = deadlinePassed ? '' : `
     <div class="card" style="border:2px solid var(--jb);margin-top:16px">
       <div class="card-title" style="color:var(--jb)">📝 Dopuna narudžbe</div>
       <p style="font-size:12px;color:var(--jm);margin-bottom:12px">Rok za predaju još nije istekao. Možete dodati artikle koje ste zaboravili.</p>
-      <div id="dopunaItems"></div>
-      <button class="btn btn-secondary" onclick="addDopunaItem()" style="margin-top:8px">+ Dodaj artikl</button>
+      <table class="order-table" id="dopunaTable">
+        <thead><tr>
+          <th style="width:70px">Šifra</th>
+          <th style="width:30%">Naziv</th>
+          <th style="width:12%">Pakiranje</th>
+          <th style="width:80px;text-align:center">Cijena (${cur})</th>
+          <th style="width:70px;text-align:center">Kol.</th>
+          <th style="width:60px;text-align:center">Max</th>
+          <th style="width:90px;text-align:right">Ukupno (${cur})</th>
+          <th style="width:30px"></th>
+        </tr></thead>
+        <tbody id="dopunaItems"></tbody>
+      </table>
+      <div style="margin-top:10px;display:flex;gap:8px">
+        <button class="btn btn-secondary" onclick="addDopunaFromList()">+ Artikl s liste</button>
+        <button class="btn btn-secondary" onclick="addDopunaCustom()">+ Dodatni artikl</button>
+      </div>
       <div style="margin-top:12px">
         <textarea id="dopunaNapomena" placeholder="Napomena za admina..." autocomplete="off"
           style="width:100%;padding:9px;border:1.5px solid var(--jbr);border-radius:4px;font-family:Inter,Verdana,sans-serif;font-size:12px;resize:vertical;min-height:50px"></textarea>
@@ -2084,7 +2195,7 @@ async function submitOrder() {
   const ukupno = calcTotal();
   const min = parseFloat(userTrgovina.minimalni_iznos || 0);
 
-  if (ukupno === 0) { alert('Narudžba ne može biti prazna!'); return; }
+  if (ukupno === 0) { await showAlert('Prazna narudžba', 'Narudžba ne može biti prazna. Dodajte barem jedan artikl.', 'warning'); return; }
   if (ukupno < min) {
     const valuta = {HR:'EUR',BA:'KM',SI:'EUR',RS:'RSD'};
     const cur = valuta[userTrgovina.drzava] || '';
@@ -2276,28 +2387,124 @@ async function editPeriodDeadline(periodId, currentDate, currentTime) {
   loadPeriod();
 }
 
-function addDopunaItem() {
+// Cache za dopuna artikle
+let dopunaArtikli = [];
+
+async function loadDopunaArtikli() {
+  if (dopunaArtikli.length > 0) return;
+  const cijenaKolona = {HR:'cijena_hr',BA:'cijena_ba',SI:'cijena_si',RS:'cijena_rs'};
+  const col = cijenaKolona[userTrgovina?.drzava] || 'cijena_hr';
+  const { data } = await sb.from('artikli').select('*').eq('aktivan', true).not(col, 'is', null).gt(col, 0).order('naziv');
+  dopunaArtikli = data || [];
+}
+
+async function addDopunaFromList() {
+  await loadDopunaArtikli();
   const list = $('dopunaItems');
   if (!list) return;
-  const idx = list.children.length;
+  
+  const drzava = userTrgovina?.drzava || 'HR';
+  const cijenaKey = {HR:'cijena_hr',BA:'cijena_ba',SI:'cijena_si',RS:'cijena_rs'}[drzava] || 'cijena_hr';
+  
+  // Kreiraj dropdown opcije
+  const options = dopunaArtikli.map(a => 
+    `<option value="${a.id}" data-sifra="${escHtml(a.sifra)}" data-naziv="${escHtml(a.naziv)}" data-pakiranje="${escHtml(a.pakiranje||'')}" data-cijena="${a[cijenaKey]||0}" data-max="${a.max_kolicina||999}">${a.sifra} — ${a.naziv}</option>`
+  ).join('');
+  
+  const html = `<tr class="dopuna-row" data-type="list">
+    <td colspan="8" style="padding:8px">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <select class="form-input" style="flex:1;padding:7px 10px;font-size:12px" onchange="onDopunaSelect(this)">
+          <option value="">— Odaberi artikl —</option>
+          ${options}
+        </select>
+        <button class="btn btn-danger btn-sm" onclick="this.closest('tr').remove()">✕</button>
+      </div>
+    </td>
+  </tr>`;
+  
+  list.insertAdjacentHTML('beforeend', html);
+}
+
+function onDopunaSelect(select) {
+  const row = select.closest('tr');
+  const opt = select.options[select.selectedIndex];
+  if (!opt || !opt.value) return;
+  
+  const sifra = opt.dataset.sifra;
+  const naziv = opt.dataset.naziv;
+  const pakiranje = opt.dataset.pakiranje || '—';
+  const cijena = parseFloat(opt.dataset.cijena) || 0;
+  const max = parseInt(opt.dataset.max) || 999;
   const valuta = {HR:'EUR',BA:'KM',SI:'EUR',RS:'RSD'};
   const cur = valuta[userTrgovina?.drzava] || '';
   
-  const html = `<div class="extra-item-row" style="display:flex;gap:8px;align-items:center;margin-bottom:8px" id="dopunaRow${idx}">
-    <input type="text" placeholder="Naziv artikla" autocomplete="off" style="flex:2;padding:7px 10px;border:1.5px solid var(--jbr);border-radius:4px;font-size:12px;font-family:Inter,Verdana,sans-serif">
-    <input type="number" placeholder="Cijena" step="0.01" min="0" autocomplete="off" style="width:90px;padding:7px 10px;border:1.5px solid var(--jbr);border-radius:4px;font-size:12px;text-align:center;font-family:Inter,Verdana,sans-serif">
-    <input type="number" placeholder="Kol." min="1" value="1" autocomplete="off" style="width:70px;padding:7px 10px;border:1.5px solid var(--jbr);border-radius:4px;font-size:12px;text-align:center;font-family:Inter,Verdana,sans-serif">
-    <button class="btn btn-danger btn-sm" onclick="this.closest('.extra-item-row').remove()">✕</button>
-  </div>`;
+  // Zamijeni red s popunjenim podacima
+  row.dataset.type = 'selected';
+  row.dataset.artiklId = opt.value;
+  row.innerHTML = `
+    <td style="font-size:11px;color:var(--jm)">${escHtml(sifra)}</td>
+    <td class="fw-bold">${escHtml(naziv)}</td>
+    <td style="font-size:11px;color:var(--jm)">${escHtml(pakiranje)}</td>
+    <td class="text-center">${cijena.toFixed(2)}</td>
+    <td class="text-center">
+      <input type="number" min="1" max="${max}" value="1" class="qty-input" autocomplete="off"
+        onchange="recalcDopunaRow(this)" onfocus="this.select()">
+    </td>
+    <td class="text-center" style="font-size:11px;color:var(--jm)">${max}</td>
+    <td class="text-right fw-bold dopuna-total">${cijena.toFixed(2)}</td>
+    <td class="text-center"><button class="btn btn-danger btn-sm" onclick="this.closest('tr').remove()">✕</button></td>`;
+  
+  // Spremi cijena u dataset za kalkulaciju
+  row.dataset.cijena = cijena;
+}
+
+function addDopunaCustom() {
+  const list = $('dopunaItems');
+  if (!list) return;
+  const valuta = {HR:'EUR',BA:'KM',SI:'EUR',RS:'RSD'};
+  const cur = valuta[userTrgovina?.drzava] || '';
+  
+  const html = `<tr class="dopuna-row" data-type="custom">
+    <td style="font-size:11px;color:var(--jm)">EXTRA</td>
+    <td><input type="text" placeholder="Naziv artikla" autocomplete="off"
+      style="width:100%;padding:6px 8px;border:1.5px solid var(--jbr);border-radius:4px;font-size:12px;font-family:Inter,Verdana,sans-serif"></td>
+    <td style="font-size:11px;color:var(--jm)">—</td>
+    <td><input type="number" placeholder="0.00" step="0.01" min="0" class="qty-input" autocomplete="off"
+      onchange="recalcDopunaRow(this)"></td>
+    <td><input type="number" min="1" value="1" class="qty-input" autocomplete="off"
+      onchange="recalcDopunaRow(this)"></td>
+    <td style="font-size:11px;color:var(--jm);text-align:center">—</td>
+    <td class="text-right fw-bold dopuna-total">0.00</td>
+    <td class="text-center"><button class="btn btn-danger btn-sm" onclick="this.closest('tr').remove()">✕</button></td>
+  </tr>`;
   
   list.insertAdjacentHTML('beforeend', html);
+}
+
+function recalcDopunaRow(input) {
+  const row = input.closest('tr');
+  if (!row) return;
+  
+  let cijena, kol;
+  if (row.dataset.type === 'selected') {
+    cijena = parseFloat(row.dataset.cijena || 0);
+    kol = parseInt(row.querySelector('.qty-input')?.value || 0);
+  } else {
+    const nums = row.querySelectorAll('input[type="number"]');
+    cijena = Math.max(0, parseFloat(nums[0]?.value || 0));
+    kol = Math.max(0, parseInt(nums[1]?.value || 0));
+  }
+  
+  const cell = row.querySelector('.dopuna-total');
+  if (cell) cell.textContent = (cijena * kol).toFixed(2);
 }
 
 async function submitDopuna(narudzbaId) {
   const list = $('dopunaItems');
   if (!list) return;
   
-  const rows = list.querySelectorAll('.extra-item-row');
+  const rows = list.querySelectorAll('.dopuna-row');
   const napomena = $('dopunaNapomena')?.value?.trim() || '';
   
   if (rows.length === 0 && !napomena) {
@@ -2307,17 +2514,36 @@ async function submitDopuna(narudzbaId) {
   
   const noveStavke = [];
   rows.forEach(row => {
-    const inputs = row.querySelectorAll('input');
-    const naziv = inputs[0]?.value?.trim();
-    const cijena = Math.max(0, parseFloat(inputs[1]?.value || 0));
-    const kolicina = Math.max(1, parseInt(inputs[2]?.value || 1));
-    if (naziv && cijena > 0) {
-      noveStavke.push({
-        narudzba_id: narudzbaId,
-        extra_naziv: '[DOPUNA] ' + naziv,
-        kolicina,
-        cijena,
-      });
+    if (row.dataset.type === 'selected') {
+      // Artikl s liste
+      const artiklId = parseInt(row.dataset.artiklId);
+      const cijena = parseFloat(row.dataset.cijena || 0);
+      const kol = parseInt(row.querySelector('.qty-input')?.value || 0);
+      if (artiklId && cijena > 0 && kol > 0) {
+        noveStavke.push({
+          narudzba_id: narudzbaId,
+          artikl_id: artiklId,
+          kolicina: kol,
+          cijena,
+        });
+      }
+    } else if (row.dataset.type === 'custom') {
+      // Custom artikl
+      const textInput = row.querySelector('input[type="text"]');
+      const numInputs = row.querySelectorAll('input[type="number"]');
+      const naziv = textInput?.value?.trim();
+      const cijena = Math.max(0, parseFloat(numInputs[0]?.value || 0));
+      const kolicina = Math.max(1, parseInt(numInputs[1]?.value || 1));
+      if (naziv && cijena > 0) {
+        noveStavke.push({
+          narudzba_id: narudzbaId,
+          extra_naziv: '[DOPUNA] ' + naziv,
+          kolicina,
+          cijena,
+        });
+      }
+    } else if (row.dataset.type === 'list') {
+      // Dropdown koji nije odabran — skip
     }
   });
   
@@ -2354,6 +2580,68 @@ async function submitDopuna(narudzbaId) {
   
   alert('✅ Dopuna poslana! Administrator će vidjeti dodane artikle označene s [DOPUNA].');
   loadStoreOrder();
+}
+
+async function vratiNaDoradu(narudzbaId, trgovinaNaziv) {
+  closeModal('narudzbaDetailModal');
+  const razlog = await showPromptModal(
+    '🔄 Vrati na doradu',
+    `Narudžba od <strong>${trgovinaNaziv}</strong> će biti vraćena trgovini na doradu.<br><br>Unesite razlog (trgovina će ga vidjeti):`,
+    'Vrati na doradu'
+  );
+  if (!razlog) return;
+  if (razlog.length < 3) { await showAlert('Greška', 'Razlog mora imati najmanje 3 znaka.', 'warning'); return; }
+  
+  const { error } = await sb.from('narudzbe').update({
+    status: 'nacrt',
+    napomena: '[VRAĆENO NA DORADU] ' + razlog
+  }).eq('id', narudzbaId);
+  
+  if (error) { await showAlert('Greška', error.message, 'error'); return; }
+  
+  await sb.from('audit_log').insert({
+    user_email: currentUser?.email || '',
+    user_role: 'admin',
+    akcija: 'VRACENO_NA_DORADU',
+    entitet: 'narudzbe',
+    entitet_id: narudzbaId,
+    detalji: { razlog, trgovina: trgovinaNaziv }
+  }).then(()=>{}).catch(()=>{});
+  
+  await showAlert('Vraćeno', `Narudžba od ${trgovinaNaziv} je vraćena na doradu.`, 'success');
+  loadAdminNarudzbe();
+  loadAdminDashboard();
+}
+
+async function ponistiNarudzbu(narudzbaId, trgovinaNaziv) {
+  closeModal('narudzbaDetailModal');
+  const razlog = await showPromptModal(
+    '❌ Poništi narudžbu',
+    `Narudžba od <strong>${trgovinaNaziv}</strong> će biti poništena.<br><br>Trgovina će moći kreirati novu narudžbu za ovaj period.<br><br>Unesite razlog:`,
+    'Poništi narudžbu'
+  );
+  if (!razlog) return;
+  if (razlog.length < 3) { await showAlert('Greška', 'Razlog mora imati najmanje 3 znaka.', 'warning'); return; }
+  
+  const { error } = await sb.from('narudzbe').update({
+    status: 'poništeno',
+    napomena: '[PONIŠTENO] ' + razlog
+  }).eq('id', narudzbaId);
+  
+  if (error) { await showAlert('Greška', error.message, 'error'); return; }
+  
+  await sb.from('audit_log').insert({
+    user_email: currentUser?.email || '',
+    user_role: 'admin',
+    akcija: 'PONISTENA_NARUDZBA',
+    entitet: 'narudzbe',
+    entitet_id: narudzbaId,
+    detalji: { razlog, trgovina: trgovinaNaziv }
+  }).then(()=>{}).catch(()=>{});
+  
+  await showAlert('Poništeno', `Narudžba od ${trgovinaNaziv} je poništena. Trgovina može kreirati novu.`, 'success');
+  loadAdminNarudzbe();
+  loadAdminDashboard();
 }
 
 async function loadLogovi() {
@@ -2488,5 +2776,18 @@ window.addEventListener('DOMContentLoaded', async () => {
   });
 });
 </script>
+
+<!-- CUSTOM ALERT/CONFIRM MODAL -->
+<div class="modal-overlay" id="customAlertModal">
+  <div class="modal" style="max-width:420px">
+    <div id="customAlertTitle" style="font-size:16px;font-weight:700;color:var(--jb);margin-bottom:14px"></div>
+    <div id="customAlertBody" style="font-size:13px;color:var(--jt);line-height:1.6"></div>
+    <div id="customAlertInput" style="display:none;margin-top:14px">
+      <textarea id="customAlertTextarea" autocomplete="off" placeholder="Unesite razlog..." 
+        style="width:100%;padding:9px;border:1.5px solid var(--jbr);border-radius:6px;font-family:Inter,Verdana,sans-serif;font-size:12px;resize:vertical;min-height:60px"></textarea>
+    </div>
+    <div class="modal-actions" id="customAlertActions"></div>
+  </div>
+</div>
 </body>
 </html>
