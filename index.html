@@ -217,28 +217,21 @@ tr:hover td{background:var(--jbgl)}
 /* ── MOBILE RESPONSIVE ── */
 
 @media (max-width: 768px) {
+  .main-wrap{flex-direction:column}
+  .sidebar{width:100%;border-right:none;border-bottom:1px solid var(--jbr);padding:8px 10px;display:flex;overflow-x:auto;gap:2px;flex-shrink:0}
+  .nav-label{display:none}
+  .nav-item{padding:8px 12px;white-space:nowrap;border-bottom:3px solid transparent;font-size:12px;border-radius:0}
+  .nav-item.active{border-bottom-color:var(--jb);border-radius:0}
+  .content{padding:14px}
   .card{overflow-x:auto;-webkit-overflow-scrolling:touch}
-  .order-table{min-width:580px}
-  table{min-width:480px}
+  table{min-width:600px}
   .filter-row{flex-direction:row!important;flex-wrap:wrap;gap:4px!important}
   .filter-btn{padding:6px 12px!important;font-size:10px!important;flex:0 0 auto}
-  .order-total{flex-direction:column!important;gap:10px;text-align:center}
-  .content{padding:12px!important}
-  .page-title{font-size:16px!important}
-  .qty-input{width:55px!important;font-size:11px!important;padding:5px 3px!important}
-}
-
-@media (max-width: 480px) {
-  .order-table{min-width:auto!important}
-  table{min-width:auto!important}
-  .order-table th,.order-table td{padding:5px 4px!important;font-size:10px!important}
-  th{font-size:8px!important;padding:6px 4px!important}
-  td{padding:6px 4px!important;font-size:11px!important}
-  .qty-input{width:45px!important;font-size:10px!important}
-  .sidebar{display:none}
-  .topbar{height:44px!important}
-  .period-status,.metrics,.country-grid,.metrics-grid{grid-template-columns:1fr 1fr!important}
-  .state-card{padding:10px!important}
+  .order-total{flex-direction:column;gap:10px;text-align:center}
+  .period-status{grid-template-columns:1fr 1fr}
+  .topbar{padding:0 12px}
+  .app-subtitle{display:none}
+  .modal{margin:10px;padding:20px;max-height:85vh}
 }
 @media (max-width: 768px) {
   .main-wrap{flex-direction:column}
