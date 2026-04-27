@@ -36,7 +36,7 @@ body{font-family:'Inter','Verdana',sans-serif;background:var(--js);color:var(--j
 .topbar{background:var(--jb);padding:0 18px;display:flex;align-items:center;justify-content:space-between;height:56px;gap:12px;flex-shrink:0}
 .topbar-left{display:flex;align-items:center;gap:14px}
 .app-subtitle{font-size:11px;color:rgba(255,255,255,0.55);padding-left:14px;border-left:1px solid rgba(255,255,255,0.2);white-space:nowrap}
-.user-pill{display:flex;align-items:center;gap:9px;font-size:12px;color:rgba(255,255,255,0.85);font-weight:500;padding:5px 12px 5px 5px;border-radius:30px;background:rgba(255,255,255,0.09);border:1px solid rgba(255,255,255,0.12)}
+.user-pill{display:flex;align-items:center;gap:8px;font-size:12px;color:white;font-weight:500;padding:4px 14px 4px 4px;border-radius:24px;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.18)}
 .avatar{width:30px;height:30px;border-radius:50%;background:var(--jy);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--jb)}
 .btn-logout{padding:5px 12px;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);border-radius:4px;color:white;font-size:11px;cursor:pointer;font-family:'Inter','Verdana',sans-serif;transition:all .15s}
 .btn-logout:hover{background:rgba(255,255,255,0.22)}
@@ -372,6 +372,13 @@ thead th{color:white!important;background:var(--jb)!important;border-bottom:none
           </div>
           <button class="btn btn-primary" onclick="openArtiklModal()">+ Novi artikl</button>
         </div>
+        <div class="filter-row" style="gap:4px;margin-bottom:14px">
+          <button class="btn filter-btn active" onclick="setArtikliDrzavaFilter('', this)">Sve</button>
+          <button class="btn filter-btn" onclick="setArtikliDrzavaFilter('HR', this)">HR</button>
+          <button class="btn filter-btn" onclick="setArtikliDrzavaFilter('BA', this)">BA</button>
+          <button class="btn filter-btn" onclick="setArtikliDrzavaFilter('SI', this)">SI</button>
+          <button class="btn filter-btn" onclick="setArtikliDrzavaFilter('RS', this)">RS</button>
+        </div>
         <div class="filter-row">
           <select class="filter-select" id="filterKategorija" onchange="loadArtikli()">
             <option value="">Sve kategorije</option>
@@ -392,15 +399,13 @@ thead th{color:white!important;background:var(--jb)!important;border-bottom:none
           </div>
           <button class="btn btn-primary" onclick="openTrgovinaModal()">+ Nova poslovnica</button>
         </div>
-        <div class="filter-row">
-          <select class="filter-select" id="filterTrDrzava" onchange="loadTrgovine()">
-            <option value="">Sve države</option>
-            <option value="HR">HR</option>
-            <option value="BA">BA</option>
-            <option value="SI">SI</option>
-            <option value="RS">RS</option>
-          </select>
-          <input class="search-input" placeholder="Pretraži poslovnice..." id="searchTrgovine" oninput="loadTrgovine()">
+        <div class="filter-row" style="gap:4px;margin-bottom:14px">
+          <button class="btn filter-btn active" onclick="setPoslovniceDrzavaFilter('', this)">Sve</button>
+          <button class="btn filter-btn" onclick="setPoslovniceDrzavaFilter('HR', this)">HR</button>
+          <button class="btn filter-btn" onclick="setPoslovniceDrzavaFilter('BA', this)">BA</button>
+          <button class="btn filter-btn" onclick="setPoslovniceDrzavaFilter('SI', this)">SI</button>
+          <button class="btn filter-btn" onclick="setPoslovniceDrzavaFilter('RS', this)">RS</button>
+          <input type="hidden" id="filterTrDrzava" value="">
         </div>
         <div class="card">
           <div id="trgovineTable"><div class="loading">Učitavanje...</div></div>
@@ -411,7 +416,7 @@ thead th{color:white!important;background:var(--jb)!important;border-bottom:none
           <button class="btn filter-btn" onclick="setPoslovniceDrzavaFilter('BA', this)">BA</button>
           <button class="btn filter-btn" onclick="setPoslovniceDrzavaFilter('SI', this)">SI</button>
           <button class="btn filter-btn" onclick="setPoslovniceDrzavaFilter('RS', this)">RS</button>
-          <input type="hidden" id="filterTrDrzava" value="">
+          
         </div>
       </div>
 
@@ -1908,12 +1913,12 @@ function renderOrderReadonly(narudzba, stavke, artikli) {
   for (const s of stavke) {
     const rowTotal = (parseFloat(s.kolicina||0) * parseFloat(s.cijena||0)).toFixed(2);
     stavkeHtml += `<tr>
-      <td>${escHtml(s.artikli?.sifra || 'EXTRA')}</td>
+      <td class="text-center" style="font-size:11px;color:var(--jm)">${escHtml(s.artikli?.sifra || 'EXTRA')}</td>
       <td>${escHtml(s.artikli?.naziv || s.extra_naziv || '')}</td>
       <td class="text-center" style="font-size:11px;color:var(--jm)">${escHtml(s.artikli?.pakiranje || '—')}</td>
       <td class="text-center">${s.kolicina}</td>
-      <td class="text-right">${parseFloat(s.cijena||0).toFixed(2)} ${cur}</td>
-      <td class="text-right fw-bold">${rowTotal} ${cur}</td>
+      <td class="text-center">${parseFloat(s.cijena||0).toFixed(2)} ${cur}</td>
+      <td class="text-center fw-bold">${rowTotal} ${cur}</td>
     </tr>`;
   }
 
@@ -1956,11 +1961,11 @@ function renderOrderReadonly(narudzba, stavke, artikli) {
     <div class="card">
       <div class="card-title">Narudžba — ${escHtml(activePeriod?.mjesec || '')}</div>
       <table class="order-table" id="tblReadonly"><thead><tr>
-        <th>Šifra</th><th>Artikl</th><th>Pakiranje</th><th>Kol.</th><th>Cijena</th><th>Ukupno</th>
+        <th style="text-align:center">Šifra</th><th>Artikl</th><th style="text-align:center">Pakiranje</th><th style="text-align:center">Kol.</th><th style="text-align:center">Cijena</th><th style="text-align:center">Ukupno</th>
       </tr></thead><tbody>${stavkeHtml}</tbody></table>
-      <div class="order-total" style="margin-top:14px">
-        <div class="order-total-label">Ukupan iznos narudžbe</div>
-        <div class="order-total-amount">${parseFloat(narudzba.ukupni_iznos||0).toFixed(2)} ${cur}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding:12px 16px;background:var(--jbg);border-radius:6px">
+        <div style="font-size:13px;color:var(--jm);font-weight:600">Ukupan iznos narudžbe</div>
+        <div style="font-size:20px;font-weight:800;color:var(--jb)">${parseFloat(narudzba.ukupni_iznos||0).toFixed(2)} ${cur}</div>
       </div>
       ${narudzba.napomena ? `<div class="alert alert-info" style="margin-top:12px"><strong>Napomena:</strong> ${escHtml(narudzba.napomena)}</div>` : ''}
     </div>
@@ -2767,12 +2772,14 @@ function sortTable(tableId, field, type) {
     if (icon) {
       icon.textContent = currentSort.dir === 'asc' ? '↑' : '↓';
       icon.style.opacity = '1';
+      icon.style.fontSize = '14px';
+      icon.style.color = '#fff';
     }
   }
 }
 
 function sortHeader(colIdx, type) {
-  return `<span class="sort-icon" style="cursor:pointer;opacity:0.3;font-size:10px;margin-left:4px" onclick="sortTable(this.closest('table').id, ${colIdx}, '${type}')">↕</span>`;
+  return `<span class="sort-icon" style="cursor:pointer;opacity:0.5;font-size:12px;margin-left:4px;color:rgba(255,255,255,0.8)" onclick="sortTable(this.closest('table').id, ${colIdx}, '${type}')">↕</span>`;
 }
 
 function togglePasswordChange() {
