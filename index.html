@@ -217,11 +217,28 @@ tr:hover td{background:var(--jbgl)}
 /* ── MOBILE RESPONSIVE ── */
 
 @media (max-width: 768px) {
-  .card{overflow-x:auto}
-  .order-table{min-width:600px}
-  table{min-width:500px}
+  .card{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .order-table{min-width:580px}
+  table{min-width:480px}
   .filter-row{flex-direction:row!important;flex-wrap:wrap;gap:4px!important}
   .filter-btn{padding:6px 12px!important;font-size:10px!important;flex:0 0 auto}
+  .order-total{flex-direction:column!important;gap:10px;text-align:center}
+  .content{padding:12px!important}
+  .page-title{font-size:16px!important}
+  .qty-input{width:55px!important;font-size:11px!important;padding:5px 3px!important}
+}
+
+@media (max-width: 480px) {
+  .order-table{min-width:auto!important}
+  table{min-width:auto!important}
+  .order-table th,.order-table td{padding:5px 4px!important;font-size:10px!important}
+  th{font-size:8px!important;padding:6px 4px!important}
+  td{padding:6px 4px!important;font-size:11px!important}
+  .qty-input{width:45px!important;font-size:10px!important}
+  .sidebar{display:none}
+  .topbar{height:44px!important}
+  .period-status,.metrics,.country-grid,.metrics-grid{grid-template-columns:1fr 1fr!important}
+  .state-card{padding:10px!important}
 }
 @media (max-width: 768px) {
   .main-wrap{flex-direction:column}
@@ -1026,8 +1043,8 @@ async function loadAdminNarudzbe() {
   }
 
   const valuta = {HR:'EUR',BA:'KM',SI:'EUR',RS:'RSD'};
-  let html = `<table class="order-items-table"><thead><tr>
-    <th>Poslovnica</th><th>Država</th><th>Iznos</th><th>Min</th><th>Status</th><th>Ažurirano</th><th></th>
+  let html = `<table id="tblAdminNarudzbe" class="order-items-table"><thead><tr>
+    <th>Poslovnica ${sortHeader(0,"str")}</th><th>Država ${sortHeader(1,"str")}</th><th>Iznos ${sortHeader(2,"num")}</th><th>Min ${sortHeader(3,"num")}</th><th>Status ${sortHeader(4,"str")}</th><th>Ažurirano ${sortHeader(5,"str")}</th><th></th>
   </tr></thead><tbody>`;
 
   for (const n of filtered) {
@@ -1154,10 +1171,10 @@ async function loadArtikli() {
     return;
   }
 
-  let html = `<table><thead><tr>
-    <th>Šifra</th><th>Naziv</th><th>Kategorija</th>
-    <th>Pakiranje</th><th>HR (EUR)</th><th>BA (KM)</th><th>SI (EUR)</th><th>RS (RSD)</th>
-    <th>Max kol.</th><th>Status</th><th></th>
+  let html = `<table id="tblArtikli"><thead><tr>
+    <th>Šifra ${sortHeader(0,'str')}</th><th>Naziv ${sortHeader(1,'str')}</th><th>Kategorija ${sortHeader(2,'str')}</th>
+    <th>Pakiranje</th><th>HR (EUR) ${sortHeader(4,'num')}</th><th>BA (KM) ${sortHeader(5,'num')}</th><th>SI (EUR) ${sortHeader(6,'num')}</th><th>RS (RSD) ${sortHeader(7,'num')}</th>
+    <th>Max kol. ${sortHeader(8,'num')}</th><th>Status</th><th></th>
   </tr></thead><tbody>`;
 
   for (const a of filtered) {
@@ -1269,9 +1286,9 @@ async function loadTrgovine() {
     return;
   }
 
-  let html = `<table><thead><tr>
-    <th>Naziv</th><th>Država</th><th>Grad</th><th>Email / Login</th>
-    <th>Kontakt</th><th>Min. iznos</th><th>Auth</th><th>Status</th><th></th>
+  let html = `<table id="tblTrgovine"><thead><tr>
+    <th>Naziv ${sortHeader(0,'str')}</th><th>Država ${sortHeader(1,'str')}</th><th>Grad ${sortHeader(2,'str')}</th><th>Email / Login ${sortHeader(3,'str')}</th>
+    <th>Kontakt</th><th>Min. iznos ${sortHeader(5,'num')}</th><th>Auth</th><th>Status</th><th></th>
   </tr></thead><tbody>`;
 
   const valuta = {HR:'EUR',BA:'KM',SI:'EUR',RS:'RSD'};
@@ -2466,16 +2483,16 @@ function addDopunaCustom() {
   const cur = valuta[userTrgovina?.drzava] || '';
   
   const html = `<tr class="dopuna-row" data-type="custom">
-    <td style="font-size:11px;color:var(--jm)">EXTRA</td>
+    <td class="text-center" style="font-size:11px;color:var(--jm)">EXTRA</td>
     <td><input type="text" placeholder="Naziv artikla" autocomplete="off"
       style="width:100%;padding:6px 8px;border:1.5px solid var(--jbr);border-radius:4px;font-size:12px;font-family:Inter,Verdana,sans-serif"></td>
-    <td style="font-size:11px;color:var(--jm)">—</td>
-    <td><input type="number" placeholder="0.00" step="0.01" min="0" class="qty-input" autocomplete="off"
+    <td class="text-center" style="font-size:11px;color:var(--jm)">—</td>
+    <td class="text-center"><input type="number" placeholder="0.00" step="0.01" min="0" class="qty-input" autocomplete="off"
       onchange="recalcDopunaRow(this)"></td>
-    <td><input type="number" min="1" value="1" class="qty-input" autocomplete="off"
+    <td class="text-center"><input type="number" min="1" value="1" class="qty-input" autocomplete="off"
       onchange="recalcDopunaRow(this)"></td>
-    <td style="font-size:11px;color:var(--jm);text-align:center">—</td>
-    <td class="text-right fw-bold dopuna-total">0.00</td>
+    <td class="text-center" style="font-size:11px;color:var(--jm)">—</td>
+    <td class="text-center fw-bold dopuna-total">0.00</td>
     <td class="text-center"><button class="btn btn-danger btn-sm" onclick="this.closest('tr').remove()">✕</button></td>
   </tr>`;
   
