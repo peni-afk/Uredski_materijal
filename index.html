@@ -378,13 +378,9 @@ thead th{color:white!important;background:var(--jb)!important;border-bottom:none
           <button class="btn filter-btn" onclick="setArtikliDrzavaFilter('BA', this)">BA</button>
           <button class="btn filter-btn" onclick="setArtikliDrzavaFilter('SI', this)">SI</button>
           <button class="btn filter-btn" onclick="setArtikliDrzavaFilter('RS', this)">RS</button>
+          <input type="hidden" id="filterArtikliDrzava" value="">
         </div>
-        <div class="filter-row">
-          <select class="filter-select" id="filterKategorija" onchange="loadArtikli()">
-            <option value="">Sve kategorije</option>
-          </select>
-          <input class="search-input" placeholder="Pretraži artikle..." id="searchArtikli" oninput="loadArtikli()">
-        </div>
+
         <div class="card">
           <div id="artikliTable"><div class="loading">Učitavanje...</div></div>
         </div>
@@ -410,14 +406,7 @@ thead th{color:white!important;background:var(--jb)!important;border-bottom:none
         <div class="card">
           <div id="trgovineTable"><div class="loading">Učitavanje...</div></div>
         </div>
-        <div class="filter-row" style="gap:4px;margin-bottom:14px">
-          <button class="btn filter-btn active" onclick="setPoslovniceDrzavaFilter('', this)">Sve</button>
-          <button class="btn filter-btn" onclick="setPoslovniceDrzavaFilter('HR', this)">HR</button>
-          <button class="btn filter-btn" onclick="setPoslovniceDrzavaFilter('BA', this)">BA</button>
-          <button class="btn filter-btn" onclick="setPoslovniceDrzavaFilter('SI', this)">SI</button>
-          <button class="btn filter-btn" onclick="setPoslovniceDrzavaFilter('RS', this)">RS</button>
-          
-        </div>
+        
       </div>
 
       <!-- ══ ADMIN: PERIOD ══ -->
@@ -1081,7 +1070,7 @@ async function viewNarudzba(narudzbaId) {
     .eq('id', narudzbaId).single();
 
   const { data: stavke } = await sb.from('stavke_narudzbe')
-    .select('*, artikli(naziv, sifra, pakiranje)')
+    .select('*, artikli(naziv, sifra, pakiranje, max_kolicina)')
     .eq('narudzba_id', narudzbaId);
 
   const valuta = {HR:'EUR',BA:'KM',SI:'EUR',RS:'RSD'};
@@ -1272,8 +1261,8 @@ async function toggleArtikl(id, trenutnoAktivan) {
 // TRGOVINE
 // ═══════════════════════════════════════════════════════
 async function loadTrgovine() {
-  const drzava = $('filterTrDrzava').value;
-  const srch = $('searchTrgovine').value.toLowerCase();
+  const drzava = $('filterTrDrzava')?.value || '';
+  const srch = '';
 
   let q = sb.from('trgovine').select('*').order('drzava').order('naziv');
   if (drzava) q = q.eq('drzava', drzava);
@@ -1878,7 +1867,7 @@ async function loadStoreOrder() {
   // Dohvati postojeće stavke
   const { data: stavke } = await sb
     .from('stavke_narudzbe')
-    .select('*, artikli(naziv, sifra, pakiranje)')
+    .select('*, artikli(naziv, sifra, pakiranje, max_kolicina)')
     .eq('narudzba_id', narudzba.id);
 
   // Popuni stanje
@@ -1914,10 +1903,11 @@ function renderOrderReadonly(narudzba, stavke, artikli) {
     const rowTotal = (parseFloat(s.kolicina||0) * parseFloat(s.cijena||0)).toFixed(2);
     stavkeHtml += `<tr>
       <td class="text-center" style="font-size:11px;color:var(--jm)">${escHtml(s.artikli?.sifra || 'EXTRA')}</td>
-      <td>${escHtml(s.artikli?.naziv || s.extra_naziv || '')}</td>
+      <td class="fw-bold">${escHtml(s.artikli?.naziv || s.extra_naziv || '')}</td>
       <td class="text-center" style="font-size:11px;color:var(--jm)">${escHtml(s.artikli?.pakiranje || '—')}</td>
-      <td class="text-center">${s.kolicina}</td>
       <td class="text-center">${parseFloat(s.cijena||0).toFixed(2)} ${cur}</td>
+      <td class="text-center">${s.kolicina}</td>
+      <td class="text-center" style="font-size:11px;color:var(--jm)">${s.artikli?.max_kolicina || '—'}</td>
       <td class="text-center fw-bold">${rowTotal} ${cur}</td>
     </tr>`;
   }
@@ -1961,7 +1951,13 @@ function renderOrderReadonly(narudzba, stavke, artikli) {
     <div class="card">
       <div class="card-title">Narudžba — ${escHtml(activePeriod?.mjesec || '')}</div>
       <table class="order-table" id="tblReadonly"><thead><tr>
-        <th style="text-align:center">Šifra</th><th>Artikl</th><th style="text-align:center">Pakiranje</th><th style="text-align:center">Kol.</th><th style="text-align:center">Cijena</th><th style="text-align:center">Ukupno</th>
+        <th style="width:70px;text-align:center">Šifra</th>
+        <th style="width:30%">Naziv</th>
+        <th style="width:12%;text-align:center">Pakiranje</th>
+        <th style="width:80px;text-align:center">Cijena</th>
+        <th style="width:70px;text-align:center">Kol.</th>
+        <th style="width:60px;text-align:center">Max</th>
+        <th style="width:90px;text-align:center">Ukupno</th>
       </tr></thead><tbody>${stavkeHtml}</tbody></table>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding:12px 16px;background:var(--jbg);border-radius:6px">
         <div style="font-size:13px;color:var(--jm);font-weight:600">Ukupan iznos narudžbe</div>
@@ -2703,6 +2699,13 @@ async function loadLogovi() {
   }
   html += '</tbody></table>';
   $('logoviTable').innerHTML = html;
+}
+
+function setPoslovniceDrzavaFilter(val, btn) {
+  if ($('filterTrDrzava')) $('filterTrDrzava').value = val;
+  document.querySelectorAll('#page-admin-trgovine .filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loadTrgovine();
 }
 
 function setArtikliDrzavaFilter(val, btn) {
