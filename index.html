@@ -1233,10 +1233,10 @@ async function loadArtikli() {
       <td>${a.cijena_rs ? parseFloat(a.cijena_rs).toFixed(2) : '—'}</td>
       <td class="text-center">${a.max_kolicina || '—'}</td>
       <td>${a.aktivan ? '<span class="badge badge-ok">Aktivan</span>' : '<span class="badge badge-draft">Neaktivan</span>'}</td>
-      <td>
-        <button class="btn btn-secondary btn-sm" onclick="openArtiklModal(${a.id})" style="margin-right:4px">Uredi</button>
+      <td><div class="d-flex gap-8" style="white-space:nowrap">
+        <button class="btn btn-secondary btn-sm" onclick="openArtiklModal(${a.id})">Uredi</button>
         <button class="btn btn-danger btn-sm" onclick="toggleArtikl(${a.id}, ${a.aktivan})">${a.aktivan ? 'Deaktiviraj' : 'Aktiviraj'}</button>
-      </td>
+      </div></td>
     </tr>`;
   }
   html += '</tbody></table>';
