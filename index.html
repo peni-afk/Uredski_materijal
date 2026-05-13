@@ -346,10 +346,16 @@ thead th{color:white!important;background:var(--jb)!important;border-bottom:none
         <div class="page-header">
           <div>
             <div class="page-title">Narudžbe</div>
-            <div class="page-sub">Sve narudžbe aktivnog perioda</div>
+            <div class="page-sub">Pregled i izvoz narudžbi po periodima</div>
           </div>
+          <button class="btn btn-primary" onclick="exportFilteredNarudzbe()" id="btnExportFiltered" style="white-space:nowrap">📥 Izvoz u Excel</button>
         </div>
-        <div class="filter-row" style="gap:4px">
+        <div class="filter-row" style="gap:6px;flex-wrap:wrap;align-items:center">
+          <select id="filterPeriod" onchange="loadAdminNarudzbe()" autocomplete="off"
+            style="padding:7px 10px;border:1.5px solid var(--jbr);border-radius:5px;font-size:12px;font-family:'Inter','Verdana',sans-serif;min-width:180px;background:white">
+            <option value="">Učitavanje...</option>
+          </select>
+          <div style="width:1px;height:24px;background:var(--jbr);margin:0 4px"></div>
           <button class="btn filter-btn active" onclick="setDrzavaFilter('', this)">Sve</button>
           <button class="btn filter-btn" onclick="setDrzavaFilter('HR', this)">HR</button>
           <button class="btn filter-btn" onclick="setDrzavaFilter('BA', this)">BA</button>
@@ -1023,18 +1029,47 @@ async function loadAdminDashboard() {
 // ═══════════════════════════════════════════════════════
 // ADMIN NARUDŽBE
 // ═══════════════════════════════════════════════════════
-async function loadAdminNarudzbe() {
-  if (!activePeriod) return;
+let allPeriods = [];
 
-  const drzava = $('filterDrzava').value;
-  const status = $('filterStatus').value;
-  const search = $('searchNarudzbe').value.toLowerCase();
+async function loadPeriodFilter() {
+  const { data: periodi } = await sb.from('period_settings').select('*').order('godina', { ascending: false }).order('id', { ascending: false });
+  allPeriods = periodi || [];
+  
+  const sel = $('filterPeriod');
+  if (!sel) return;
+  
+  let html = '<option value="all">Svi periodi</option>';
+  for (const p of allPeriods) {
+    const label = `${escHtml(p.mjesec)}${p.aktivan ? ' ● AKTIVAN' : ''}`;
+    const val = `${p.mjesec}|${p.godina}`;
+    const selected = (activePeriod && p.mjesec === activePeriod.mjesec && p.godina === activePeriod.godina) ? ' selected' : '';
+    html += `<option value="${val}"${selected}>${label}</option>`;
+  }
+  sel.innerHTML = html;
+}
+
+async function loadAdminNarudzbe() {
+  // Učitaj period filter ako još nije
+  if (!allPeriods.length) await loadPeriodFilter();
+
+  const drzava = $('filterDrzava')?.value || '';
+  const status = $('filterStatus')?.value || '';
+  const search = ($('searchNarudzbe')?.value || '').toLowerCase();
+  const periodVal = $('filterPeriod')?.value || '';
 
   let q = sb.from('narudzbe')
     .select('*, trgovine(naziv, drzava, email, minimalni_iznos)')
-    .eq('period_mjesec', activePeriod.mjesec)
-    .eq('period_godina', activePeriod.godina)
     .order('updated_at', { ascending: false });
+
+  // Period filter
+  if (periodVal && periodVal !== 'all') {
+    const [mjesec, godina] = periodVal.split('|');
+    q = q.eq('period_mjesec', mjesec).eq('period_godina', parseInt(godina));
+  } else if (periodVal === 'all') {
+    // Bez period filtera — dohvati sve
+  } else if (activePeriod) {
+    q = q.eq('period_mjesec', activePeriod.mjesec).eq('period_godina', activePeriod.godina);
+  }
 
   if (status) q = q.eq('status', status);
 
@@ -1053,8 +1088,10 @@ async function loadAdminNarudzbe() {
   }
 
   const valuta = {HR:'EUR',BA:'KM',SI:'EUR',RS:'RSD'};
+  const showPeriodCol = periodVal === 'all';
+  
   let html = `<table id="tblAdminNarudzbe" class="order-items-table"><thead><tr>
-    <th>Poslovnica ${sortHeader(0,"str")}</th><th>Država ${sortHeader(1,"str")}</th><th>Iznos ${sortHeader(2,"num")}</th><th>Min ${sortHeader(3,"num")}</th><th>Status ${sortHeader(4,"str")}</th><th>Ažurirano ${sortHeader(5,"str")}</th><th></th>
+    <th>Poslovnica ${sortHeader(0,"str")}</th><th>Država ${sortHeader(1,"str")}</th>${showPeriodCol ? `<th>Period ${sortHeader(2,"str")}</th>` : ''}<th>Iznos ${sortHeader(showPeriodCol?3:2,"num")}</th><th>Min ${sortHeader(showPeriodCol?4:3,"num")}</th><th>Status ${sortHeader(showPeriodCol?5:4,"str")}</th><th>Ažurirano ${sortHeader(showPeriodCol?6:5,"str")}</th><th></th>
   </tr></thead><tbody>`;
 
   for (const n of filtered) {
@@ -1067,10 +1104,13 @@ async function loadAdminNarudzbe() {
     html += `<tr>
       <td class="fw-bold">${escHtml(n.trgovine?.naziv||'—')}</td>
       <td>${getBadgeDrzava(drzavaKod)}</td>
+      ${showPeriodCol ? `<td class="text-muted" style="font-size:11px">${escHtml(n.period_mjesec || '')}</td>` : ''}
       <td class="fw-bold" style="color:${minOk ? 'var(--jok)' : 'var(--jwa)'}">${iznos.toFixed(2)} ${cur}</td>
       <td class="text-muted">${min.toFixed(2)} ${cur}</td>
       <td>${n.status === 'predano'
         ? '<span class="badge badge-ok">✓ Predano</span>'
+        : n.status === 'poništeno'
+        ? '<span class="badge badge-danger">✕ Poništeno</span>'
         : '<span class="badge badge-draft">Nacrt</span>'}</td>
       <td class="text-muted">${fmtDate(n.updated_at)}</td>
       <td><button class="btn-edit btn" onclick="viewNarudzba(${n.id})">Detalji</button></td>
@@ -1265,8 +1305,7 @@ async function saveArtikl() {
 
 async function toggleArtikl(id, trenutnoAktivan) {
   const akcija = trenutnoAktivan ? 'deaktivirati' : 'aktivirati';
-  const ok = await showConfirm('Potvrda', `Želite li ${akcija} ovaj artikl?`);
-  if (!ok) return;
+  if (!(await showConfirm('Potvrda', `Želite li ${akcija} ovaj artikl?`))) return;
   await sb.from('artikli').update({ aktivan: !trenutnoAktivan }).eq('id', id);
   loadArtikli();
 }
@@ -1677,6 +1716,123 @@ async function exportExcel(drzava) {
   XLSX.writeFile(wb, `JYSK_Narudzbe_${drzava}_${activePeriod.godina}_${activePeriod.mjesec.split(' ')[0]}.xlsx`);
 
   if (btn) { btn.textContent = `✅ Preuzeto ${drzava}`; btn.classList.add('done'); btn.disabled = false; }
+}
+
+async function exportFilteredNarudzbe() {
+  const btn = $('btnExportFiltered');
+  if (btn) { btn.textContent = '⏳ Priprema...'; btn.disabled = true; }
+
+  const periodVal = $('filterPeriod')?.value || '';
+  const drzava = $('filterDrzava')?.value || '';
+
+  let q = sb.from('narudzbe')
+    .select('*, trgovine(naziv, drzava, grad, email, kontakt_osoba, telefon, minimalni_iznos)')
+    .order('period_godina', { ascending: false })
+    .order('updated_at', { ascending: false });
+
+  let periodLabel = 'Svi periodi';
+  if (periodVal && periodVal !== 'all') {
+    const [mjesec, godina] = periodVal.split('|');
+    q = q.eq('period_mjesec', mjesec).eq('period_godina', parseInt(godina));
+    periodLabel = mjesec;
+  } else if (!periodVal && activePeriod) {
+    q = q.eq('period_mjesec', activePeriod.mjesec).eq('period_godina', activePeriod.godina);
+    periodLabel = activePeriod.mjesec;
+  }
+
+  const { data: narudzbe } = await q;
+  let filtered = narudzbe || [];
+  if (drzava) filtered = filtered.filter(n => n.trgovine?.drzava === drzava);
+
+  if (!filtered.length) {
+    await showAlert('Nema podataka', 'Nema narudžbi za odabrane filtere.', 'warning');
+    if (btn) { btn.textContent = '📥 Izvoz u Excel'; btn.disabled = false; }
+    return;
+  }
+
+  const valuta = {HR:'EUR',BA:'KM',SI:'EUR',RS:'RSD'};
+  const wb = XLSX.utils.book_new();
+
+  // Sheet 1: Sažetak svih narudžbi
+  const sazetakData = [
+    ['JYSK — Narudžbe uredskog materijala'],
+    [`Period: ${periodLabel}${drzava ? ' | Država: ' + drzava : ' | Sve države'}`],
+    [`Generirano: ${new Date().toLocaleDateString('hr-HR')} u ${new Date().toLocaleTimeString('hr-HR')}`],
+    [],
+    ['Poslovnica', 'Država', 'Grad', 'Period', 'Kontakt', 'Email', 'Iznos', 'Valuta', 'Status', 'Napomena'],
+  ];
+
+  let ukupnoSve = 0;
+  for (const n of filtered) {
+    const drz = n.trgovine?.drzava || '';
+    const cur = valuta[drz] || '';
+    const iznos = parseFloat(n.ukupni_iznos || 0);
+    sazetakData.push([
+      n.trgovine?.naziv || '',
+      drz,
+      n.trgovine?.grad || '',
+      n.period_mjesec || '',
+      n.trgovine?.kontakt_osoba || '',
+      n.trgovine?.email || '',
+      iznos,
+      cur,
+      n.status === 'predano' ? 'Predano' : n.status === 'poništeno' ? 'Poništeno' : 'Nacrt',
+      n.napomena || '',
+    ]);
+    ukupnoSve += iznos;
+  }
+  sazetakData.push([]);
+  sazetakData.push(['', '', '', '', '', 'UKUPNO:', ukupnoSve, '', '', '']);
+
+  const ws1 = XLSX.utils.aoa_to_sheet(sazetakData);
+  ws1['!cols'] = [{wch:25},{wch:6},{wch:15},{wch:20},{wch:20},{wch:28},{wch:12},{wch:6},{wch:10},{wch:30}];
+  XLSX.utils.book_append_sheet(wb, ws1, 'Sažetak');
+
+  // Sheet 2: Sve stavke detaljno
+  const detaljData = [
+    ['Poslovnica', 'Država', 'Period', 'Šifra', 'Artikl', 'Kategorija', 'Količina', 'Cijena', 'Ukupno', 'Valuta'],
+  ];
+
+  for (const n of filtered) {
+    const { data: stavke } = await sb.from('stavke_narudzbe')
+      .select('*, artikli(naziv, sifra, kategorija)')
+      .eq('narudzba_id', n.id);
+
+    const drz = n.trgovine?.drzava || '';
+    const cur = valuta[drz] || '';
+
+    for (const s of (stavke || [])) {
+      detaljData.push([
+        n.trgovine?.naziv || '',
+        drz,
+        n.period_mjesec || '',
+        s.artikli?.sifra || (s.extra_naziv ? 'EXTRA' : ''),
+        s.artikli?.naziv || s.extra_naziv || '',
+        s.artikli?.kategorija || '—',
+        s.kolicina,
+        parseFloat(s.cijena || 0),
+        parseFloat(s.cijena || 0) * parseInt(s.kolicina || 0),
+        cur,
+      ]);
+    }
+  }
+
+  const ws2 = XLSX.utils.aoa_to_sheet(detaljData);
+  ws2['!cols'] = [{wch:25},{wch:6},{wch:20},{wch:12},{wch:35},{wch:15},{wch:10},{wch:10},{wch:10},{wch:6}];
+  XLSX.utils.book_append_sheet(wb, ws2, 'Stavke detaljno');
+
+  const filenameParts = ['JYSK_Narudzbe'];
+  if (drzava) filenameParts.push(drzava);
+  if (periodVal && periodVal !== 'all') {
+    const [mjesec] = periodVal.split('|');
+    filenameParts.push(mjesec.split(' ')[0]);
+  } else {
+    filenameParts.push('svi_periodi');
+  }
+  XLSX.writeFile(wb, filenameParts.join('_') + '.xlsx');
+
+  if (btn) { btn.textContent = '📥 Izvoz u Excel'; btn.disabled = false; }
+  await showAlert('Izvoz', 'Excel datoteka je preuzeta.', 'success');
 }
 
 // ═══════════════════════════════════════════════════════
@@ -2317,7 +2473,6 @@ async function submitOrder() {
 
   const success = await persistOrder('predano');
   if (!success) return;
-  // Audit log se sada radi u Edge Function
   
   await showAlert('Predano', 'Narudžba je uspješno predana!', 'success');
   loadStoreDashboard();
@@ -2687,7 +2842,8 @@ async function submitDopuna(narudzbaId) {
         narudzba_id: narudzbaId,
         status: 'predano',
         napomena: novaNapomena,
-        stavke
+        stavke,
+        mode: 'dopuna'
       })
     });
     
