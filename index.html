@@ -1265,7 +1265,8 @@ async function saveArtikl() {
 
 async function toggleArtikl(id, trenutnoAktivan) {
   const akcija = trenutnoAktivan ? 'deaktivirati' : 'aktivirati';
-  if (!confirm(`Želite li ${akcija} ovaj artikl?`)) return;
+  const ok = await showConfirm('Potvrda', `Želite li ${akcija} ovaj artikl?`);
+  if (!ok) return;
   await sb.from('artikli').update({ aktivan: !trenutnoAktivan }).eq('id', id);
   loadArtikli();
 }
@@ -1412,7 +1413,7 @@ async function saveTrgovina() {
       if (!response.ok || !result.success) {
         // Rollback - obriši kreiranu trgovinu
         await sb.from('trgovine').delete().eq('id', novaTrgovina.id);
-        alert('❌ Greška pri kreiranju korisnika: ' + (result.error || 'Nepoznata greška') + 
+        await showAlert('Greška', 'Greška pri kreiranju korisnika: ' + (result.error || 'Nepoznata greška') + 
               '\n\nProvjerite:\n- Je li Edge Function deployed?\n- Je li email već u upotrebi?');
         return;
       }
@@ -1421,8 +1422,8 @@ async function saveTrgovina() {
     } catch (fetchErr) {
       // Rollback ako fetch padne
       await sb.from('trgovine').delete().eq('id', novaTrgovina.id);
-      alert('❌ Greška mreže: ' + fetchErr.message + 
-            '\n\nProvjerite je li Edge Function "create-store-user" deployed u Supabase Dashboardu.');
+      await showAlert('Greška', 'Greška mreže: ' + fetchErr.message + 
+            '\n\nProvjerite je li Edge Function "create-store-user" deployed u Supabase Dashboardu.', 'error');
       return;
     }
   } else {
@@ -1474,14 +1475,19 @@ async function saveTrgovina() {
 }
 
 async function toggleTrgovina(id, trenutnoAktivan) {
-  if (!confirm(`Želite li ${trenutnoAktivan ? 'deaktivirati' : 'aktivirati'} ovu poslovnicu?\n\n` +
-    `${trenutnoAktivan ? 'Deaktivirana poslovnica neće moći kreirati nove narudžbe, ali postojeći podaci ostaju.' : 'Aktivirana poslovnica ponovno može koristiti aplikaciju.'}`)) return;
+  const akcija = trenutnoAktivan ? 'deaktivirati' : 'aktivirati';
+  const poruka = trenutnoAktivan 
+    ? 'Deaktivirana poslovnica neće moći kreirati nove narudžbe, ali postojeći podaci ostaju.' 
+    : 'Aktivirana poslovnica ponovno može koristiti aplikaciju.';
+  const ok = await showConfirm('Potvrda', `Želite li ${akcija} ovu poslovnicu?\n\n${poruka}`);
+  if (!ok) return;
   await sb.from('trgovine').update({ aktivan: !trenutnoAktivan }).eq('id', id);
   loadTrgovine();
 }
 
 async function deleteTrgovina(id, naziv) {
-  if (!confirm(`⚠️ TRAJNO obrisati poslovnicu "${naziv}"?\n\nOvo će obrisati:\n- Poslovnicu iz baze\n- Korisnički račun\n- Sve narudžbe i stavke\n\nOvu akciju NIJE moguće poništiti!`)) return;
+  const ok1 = await showConfirm('Brisanje poslovnice', `TRAJNO obrisati poslovnicu "${naziv}"?\n\nOvo će obrisati:\n- Poslovnicu iz baze\n- Korisnički račun\n- Sve narudžbe i stavke\n\nOvu akciju NIJE moguće poništiti!`, 'Obriši', 'Odustani');
+  if (!ok1) return;
   if (!(await showConfirm('Potvrda', `Zaista obrisati "${naziv}"?`))) return;
   
   // Dohvati user_id
@@ -1511,9 +1517,9 @@ async function deleteTrgovina(id, naziv) {
   const { error } = await sb.from('trgovine').delete().eq('id', id);
   
   if (error) {
-    alert('Greška pri brisanju: ' + error.message);
+    await showAlert('Greška', 'Greška pri brisanju: ' + error.message, 'error');
   } else {
-    alert('✅ Poslovnica obrisana.');
+    await showAlert('Obrisano', 'Poslovnica je obrisana.', 'success');
     loadTrgovine();
   }
 }
@@ -1562,12 +1568,12 @@ async function savePeriod() {
     aktivan: true,
   };
 
-  if (!payload.mjesec || !payload.deadline_datum) { alert('Naziv mjeseca i deadline su obavezni!'); return; }
+  if (!payload.mjesec || !payload.deadline_datum) { await showAlert('Nepotpuni podaci', 'Naziv mjeseca i deadline su obavezni.', 'warning'); return; }
   
   // Provjeri da deadline nije u prošlosti
   const deadlineDate = new Date(`${payload.deadline_datum}T${payload.deadline_vrijeme}`);
   if (deadlineDate <= new Date()) {
-    const ok = confirm('⚠️ Uneseni deadline je u prošlosti! Jeste li sigurni?');
+    const ok = await showConfirm('Upozorenje', 'Uneseni deadline je u prošlosti! Jeste li sigurni?', 'Da', 'Odustani');
     if (!ok) return;
   }
 
@@ -2086,7 +2092,7 @@ async function updateItem(artiklId, value, cijena, maxKolicina) {
   const kol = Math.max(0, parseInt(value) || 0);
 
   if (kol > maxKolicina) {
-    alert(`Maksimalna dozvoljena količina za ovaj artikl je ${maxKolicina}!`);
+    showAlert('Ograničenje', `Maksimalna dozvoljena količina za ovaj artikl je ${maxKolicina}.`, 'warning');
     const input = document.querySelector(`#row-${artiklId} input`);
     if (input) input.value = maxKolicina;
     storeOrderItems[artiklId] = { ...(storeOrderItems[artiklId] || {}), kolicina: maxKolicina, cijena };
@@ -2282,10 +2288,10 @@ function removeExtra(idx) {
 }
 
 async function saveOrderDraft() {
-  await persistOrder('nacrt');
-  // Audit log se sada radi u Edge Function
+  const success = await persistOrder('nacrt');
+  if (!success) return;
   
-  alert('✅ Nacrt je spremljen!');
+  await showAlert('Spremljeno', 'Nacrt je spremljen!', 'success');
 }
 
 async function submitOrder() {
@@ -2293,7 +2299,7 @@ async function submitOrder() {
   if (activePeriod) {
     const deadline = new Date(`${activePeriod.deadline_datum}T${activePeriod.deadline_vrijeme}`);
     if (new Date() > deadline) {
-      alert('⚠️ Rok za predaju narudžbe je istekao!\n\nKontaktirajte admina ako trebate produženje.');
+      await showAlert('Rok istekao', 'Rok za predaju narudžbe je istekao!\n\nKontaktirajte admina ako trebate produženje.', 'warning');
       return;
     }
   }
@@ -2305,14 +2311,15 @@ async function submitOrder() {
   if (ukupno < min) {
     const valuta = {HR:'EUR',BA:'KM',SI:'EUR',RS:'RSD'};
     const cur = valuta[userTrgovina.drzava] || '';
-    const ok = confirm(`⚠️ Iznos narudžbe (${ukupno.toFixed(2)} ${cur}) je manji od minimuma (${min.toFixed(2)} ${cur}).\n\nŽelite li svejedno predati narudžbu?`);
+    const ok = await showConfirm('Ispod minimuma', `Iznos narudžbe (${ukupno.toFixed(2)} ${cur}) je manji od minimuma (${min.toFixed(2)} ${cur}).\n\nŽelite li svejedno predati narudžbu?`, 'Predaj', 'Odustani');
     if (!ok) return;
   }
 
-  await persistOrder('predano');
+  const success = await persistOrder('predano');
+  if (!success) return;
   // Audit log se sada radi u Edge Function
   
-  alert('✅ Narudžba je uspješno predana!');
+  await showAlert('Predano', 'Narudžba je uspješno predana!', 'success');
   loadStoreDashboard();
   showPage('store-dashboard');
 }
@@ -2472,7 +2479,7 @@ Zabilježite podatke:`;
         ⚠️ Ove podatke proslijedite poslovnici. Nakon zatvaranja ovog prozora lozinka više neće biti vidljiva.
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end">
-        <button onclick="navigator.clipboard?.writeText('Email: ${email}\nLozinka: ${lozinka}').then(()=>alert('Kopirano!'))" 
+        <button onclick="navigator.clipboard?.writeText('Email: ${email}\nLozinka: ${lozinka}').then(()=>showAlert('Kopirano','Podaci su kopirani u međuspremnik.','success'))" 
           style="padding:8px 14px;background:#f0f4fb;border:1px solid #c5cfdf;border-radius:4px;cursor:pointer;font-family:'Inter','Verdana',sans-serif;font-size:11px">
           📋 Kopiraj
         </button>
@@ -2502,7 +2509,7 @@ async function editPeriodDeadline(periodId, currentDate, currentTime) {
   const { data: p } = await sb.from('period_settings').select('*').eq('aktivan', true).maybeSingle();
   activePeriod = p;
   
-  alert('✅ Deadline ažuriran!');
+  await showAlert('Ažurirano', 'Deadline je ažuriran!', 'success');
   loadPeriod();
 }
 
