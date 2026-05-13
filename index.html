@@ -1846,29 +1846,6 @@ async function loadStoreDashboard() {
 
   // Countdown
   renderCountdown();
-  
-  // Provjeri ima li vraćenu narudžbu
-  if (activePeriod) {
-    const { data: vracena } = await sb.from('narudzbe')
-      .select('napomena, status')
-      .eq('trgovina_id', userTrgovina.id)
-      .eq('period_mjesec', activePeriod.mjesec)
-      .eq('period_godina', activePeriod.godina)
-      .eq('status', 'nacrt')
-      .maybeSingle();
-    
-    if (vracena?.napomena?.includes('[VRAĆENO NA DORADU]')) {
-      const razlog = vracena.napomena.replace('[VRAĆENO NA DORADU] ', '');
-      $('storeCountdown').insertAdjacentHTML('afterend', `
-        <div class="alert" style="background:#fff3cd;border:2px solid #f59e0b;color:#92400e;margin-bottom:16px;border-radius:8px;padding:16px">
-          <div style="font-weight:700;font-size:14px;margin-bottom:6px">⚠️ Narudžba vraćena na doradu!</div>
-          <div style="font-size:13px">Administrator je vratio vašu narudžbu. Razlog: <strong>${escHtml(razlog)}</strong></div>
-          <div style="margin-top:10px">
-            <button class="btn btn-primary btn-sm" onclick="navTo('store-narudzba', document.querySelectorAll('.nav-item')[1])">✏️ Uredi narudžbu</button>
-          </div>
-        </div>`);
-    }
-  }
 
   if (!activePeriod) {
     $('storeCurrentOrder').innerHTML = '<div class="alert alert-info">Trenutno nema aktivnog perioda naručivanja.</div>';
@@ -1908,6 +1885,19 @@ async function loadStoreDashboard() {
   const iznos = parseFloat(narudzba.ukupni_iznos || 0);
   const progress = min > 0 ? Math.min((iznos / min) * 100, 100) : 100;
   const progressClass = progress >= 100 ? 'ok' : progress >= 70 ? 'warn' : '';
+
+  // Banner za vraćenu narudžbu — samo ako je u nacrtu
+  if (narudzba.status === 'nacrt' && narudzba.napomena?.includes('[VRAĆENO NA DORADU]')) {
+    const razlog = narudzba.napomena.replace('[VRAĆENO NA DORADU] ', '');
+    $('storeCountdown').insertAdjacentHTML('afterend', `
+      <div class="alert" style="background:#fff3cd;border:2px solid #f59e0b;color:#92400e;margin-bottom:16px;border-radius:8px;padding:16px">
+        <div style="font-weight:700;font-size:14px;margin-bottom:6px">⚠️ Narudžba vraćena na doradu!</div>
+        <div style="font-size:13px">Administrator je vratio vašu narudžbu. Razlog: <strong>${escHtml(razlog)}</strong></div>
+        <div style="margin-top:10px">
+          <button class="btn btn-primary btn-sm" onclick="navTo('store-narudzba', document.querySelectorAll('.nav-item')[1])">✏️ Uredi narudžbu</button>
+        </div>
+      </div>`);
+  }
 
   $('storeCurrentOrder').innerHTML = `
     <div class="card">
@@ -2222,7 +2212,7 @@ function renderOrderForm(narudzba, artikli) {
     <div class="card">
       <div class="card-title">Napomena</div>
       <textarea id="napomenaField" autocomplete="off" style="width:100%;padding:9px;border:1.5px solid var(--jbr);border-radius:4px;font-family:'Inter','Verdana',sans-serif;font-size:12px;resize:vertical;min-height:60px" 
-        placeholder="Opcionalna napomena za admina...">${escHtml(narudzba.napomena || '')}</textarea>
+        placeholder="Opcionalna napomena za admina...">${escHtml((narudzba.napomena || '').replace(/\[VRAĆENO NA DORADU\]\s*/g, ''))}</textarea>
     </div>
 
     <div class="order-total" id="orderTotalBar">
