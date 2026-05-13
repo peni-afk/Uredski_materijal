@@ -768,12 +768,7 @@ function showPromptModal(title, body, confirmText = 'Potvrdi') {
   return new Promise(resolve => {
     _modalResolve = resolve;
     $('customAlertTitle').textContent = title;
-    // SIGURNA OPCIJA: textContent default, innerHTML samo za hardcoded HTML
-  if (typeof body === 'string' && body.trim().startsWith('<')) {
     $('customAlertBody').innerHTML = body;
-  } else {
-    $('customAlertBody').textContent = body;
-  }
     $('customAlertInput').style.display = 'block';
     $('customAlertTextarea').value = '';
     $('customAlertActions').innerHTML = `
@@ -1640,7 +1635,8 @@ async function exportExcel(drzava) {
     .from('narudzbe')
     .select('*, trgovine(naziv, drzava, grad, email, kontakt_osoba, telefon, minimalni_iznos)')
     .eq('period_mjesec', activePeriod.mjesec)
-    .eq('period_godina', activePeriod.godina);
+    .eq('period_godina', activePeriod.godina)
+    .neq('status', 'poništeno');
 
   const dNar = (narudzbe || []).filter(n => n.trgovine?.drzava === drzava);
 
@@ -1727,6 +1723,7 @@ async function exportFilteredNarudzbe() {
 
   let q = sb.from('narudzbe')
     .select('*, trgovine(naziv, drzava, grad, email, kontakt_osoba, telefon, minimalni_iznos)')
+    .neq('status', 'poništeno')
     .order('period_godina', { ascending: false })
     .order('updated_at', { ascending: false });
 
@@ -1878,20 +1875,24 @@ async function loadStoreDashboard() {
     return;
   }
 
-  // Dohvati trenutnu narudžbu
-  const { data: narudzba } = await sb
+  // Dohvati trenutnu narudžbu (ignoriraj poništene)
+  const { data: narList } = await sb
     .from('narudzbe')
     .select('*')
     .eq('trgovina_id', userTrgovina.id)
     .eq('period_mjesec', activePeriod.mjesec)
     .eq('period_godina', activePeriod.godina)
-    .maybeSingle();
+    .neq('status', 'poništeno')
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  const narudzba = narList?.[0] || null;
 
   const valuta = {HR:'EUR',BA:'KM',SI:'EUR',RS:'RSD'};
   const cur = valuta[userTrgovina.drzava] || '';
   const min = parseFloat(userTrgovina.minimalni_iznos || 0);
 
-  if (!narudzba || narudzba.status === 'poništeno') {
+  if (!narudzba) {
     $('storeCurrentOrder').innerHTML = `
       <div class="card">
         <div class="card-title">Narudžba za ${escHtml(activePeriod.mjesec)}</div>
@@ -1996,14 +1997,18 @@ async function loadStoreOrder() {
 
   $('storeOrderPeriodSub').textContent = `Period: ${activePeriod.mjesec} | Deadline: ${fmtDate(activePeriod.deadline_datum)}`;
 
-  // Dohvati ili kreiraj narudžbu
-  let { data: narudzba } = await sb
+  // Dohvati ili kreiraj narudžbu (ignoriraj poništene)
+  let { data: narudzbe } = await sb
     .from('narudzbe')
     .select('*')
     .eq('trgovina_id', userTrgovina.id)
     .eq('period_mjesec', activePeriod.mjesec)
     .eq('period_godina', activePeriod.godina)
-    .maybeSingle();
+    .neq('status', 'poništeno')
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  let narudzba = narudzbe?.[0] || null;
 
   if (!narudzba) {
     // Dohvati točne nazive kolona iz period_settings
