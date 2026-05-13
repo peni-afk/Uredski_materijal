@@ -726,7 +726,12 @@ function showAlert(title, body, type = 'info') {
   return new Promise(resolve => {
     _modalResolve = resolve;
     $('customAlertTitle').textContent = title;
+    // SIGURNA OPCIJA: textContent default, innerHTML samo za hardcoded HTML
+  if (typeof body === 'string' && body.trim().startsWith('<')) {
     $('customAlertBody').innerHTML = body;
+  } else {
+    $('customAlertBody').textContent = body;
+  }
     $('customAlertInput').style.display = 'none';
     const icons = {success:'✅', error:'❌', warning:'⚠️', info:'ℹ️'};
     $('customAlertTitle').textContent = (icons[type]||'') + ' ' + title;
@@ -739,7 +744,12 @@ function showConfirm(title, body, confirmText = 'Da', cancelText = 'Odustani') {
   return new Promise(resolve => {
     _modalResolve = resolve;
     $('customAlertTitle').textContent = title;
+    // SIGURNA OPCIJA: textContent default, innerHTML samo za hardcoded HTML
+  if (typeof body === 'string' && body.trim().startsWith('<')) {
     $('customAlertBody').innerHTML = body;
+  } else {
+    $('customAlertBody').textContent = body;
+  }
     $('customAlertInput').style.display = 'none';
     $('customAlertActions').innerHTML = `
       <button class="btn btn-secondary" onclick="closeCustomModal(false)">${cancelText}</button>
@@ -752,7 +762,12 @@ function showPromptModal(title, body, confirmText = 'Potvrdi') {
   return new Promise(resolve => {
     _modalResolve = resolve;
     $('customAlertTitle').textContent = title;
+    // SIGURNA OPCIJA: textContent default, innerHTML samo za hardcoded HTML
+  if (typeof body === 'string' && body.trim().startsWith('<')) {
     $('customAlertBody').innerHTML = body;
+  } else {
+    $('customAlertBody').textContent = body;
+  }
     $('customAlertInput').style.display = 'block';
     $('customAlertTextarea').value = '';
     $('customAlertActions').innerHTML = `
@@ -2268,15 +2283,7 @@ function removeExtra(idx) {
 
 async function saveOrderDraft() {
   await persistOrder('nacrt');
-  // Logiraj nacrt
-  await sb.from('audit_log').insert({
-    user_email: currentUser?.email || '',
-    user_role: userRole || 'store',
-    akcija: 'SPREMI_NACRT',
-    entitet: 'narudzbe',
-    entitet_id: storeOrderId,
-    detalji: { ukupni_iznos: calcTotal() }
-  }).then(() => {}).catch(() => {});
+  // Audit log se sada radi u Edge Function
   
   alert('✅ Nacrt je spremljen!');
 }
@@ -2303,15 +2310,7 @@ async function submitOrder() {
   }
 
   await persistOrder('predano');
-  // Logiraj predaju
-  await sb.from('audit_log').insert({
-    user_email: currentUser?.email || '',
-    user_role: userRole || 'store',
-    akcija: 'PREDAJA_NARUDZBE',
-    entitet: 'narudzbe',
-    entitet_id: storeOrderId,
-    detalji: { ukupni_iznos: ukupno }
-  }).then(() => {}).catch(() => {});
+  // Audit log se sada radi u Edge Function
   
   alert('✅ Narudžba je uspješno predana!');
   loadStoreDashboard();
@@ -2319,85 +2318,90 @@ async function submitOrder() {
 }
 
 async function persistOrder(status) {
-  const napomena = $('napomenaField')?.value || '';
-  const ukupno = calcTotal();
-
-  // Update stavki — obriši sve stare, dodaj nove
-  const { error: delErr } = await sb.from('stavke_narudzbe').delete().eq('narudzba_id', storeOrderId);
-  if (delErr) {
-    console.error('persistOrder delete error:', delErr);
-    alert('Greška pri brisanju starih stavki: ' + delErr.message);
-    return;
+  if (!storeOrderId) {
+    await showAlert('Greška', 'Narudžba nije inicijalizirana.', 'error');
+    return false;
   }
 
-  const noveStavke = [];
+  // Pripremi listu stavki — samo artikl_id + kolicina (server izračunava cijenu!)
+  const stavke = [];
+  
+  // Standardni artikli
   for (const [artiklId, item] of Object.entries(storeOrderItems)) {
-    if (item.kolicina > 0) {
-      noveStavke.push({
-        narudzba_id: storeOrderId,
+    const kol = Math.max(0, parseInt(item.kolicina) || 0);
+    if (kol > 0) {
+      stavke.push({
         artikl_id: parseInt(artiklId),
-        kolicina: item.kolicina,
-        cijena: item.cijena,
+        kolicina: kol
       });
     }
   }
-
+  
   // Extra artikli iz DOM-a
   const extraList = $('extraItemsList');
   if (extraList) {
     extraList.querySelectorAll('tr.extra-row').forEach(row => {
       if (row.dataset.type === 'selected') {
-        // Artikl s liste
         const artiklId = parseInt(row.dataset.artiklId);
-        const cijena = parseFloat(row.dataset.cijena || 0);
-        const kol = parseInt(row.querySelector('.qty-input')?.value || 0);
-        if (artiklId && cijena > 0 && kol > 0) {
-          noveStavke.push({
-            narudzba_id: storeOrderId,
-            artikl_id: artiklId,
-            kolicina: kol,
-            cijena,
-          });
+        const kol = Math.max(0, parseInt(row.querySelector('.qty-input')?.value || 0));
+        if (artiklId && kol > 0) {
+          stavke.push({ artikl_id: artiklId, kolicina: kol });
         }
       } else if (row.dataset.type !== 'list') {
-        // Slobodan unos
         const nazEl = row.querySelector('input[type="text"]');
         const nums = row.querySelectorAll('input[type="number"]');
         const naziv = nazEl?.value?.trim();
-        const cijena = Math.max(0, parseFloat(nums[0]?.value || 0));
-        const kolicina = Math.max(1, parseInt(nums[1]?.value || 1));
-        if (naziv && cijena > 0 && kolicina > 0) {
-          noveStavke.push({
-            narudzba_id: storeOrderId,
+        const extra_cijena = Math.max(0, parseFloat(nums[0]?.value || 0));
+        const kol = Math.max(1, parseInt(nums[1]?.value || 1));
+        if (naziv && extra_cijena > 0 && kol > 0) {
+          stavke.push({
+            artikl_id: null,
             extra_naziv: naziv,
-            kolicina,
-            cijena,
+            extra_cijena,
+            kolicina: kol
           });
         }
       }
     });
   }
-
-  if (noveStavke.length) {
-    const { error: stavkeErr } = await sb.from('stavke_narudzbe').insert(noveStavke);
-    if (stavkeErr) {
-      console.error('persistOrder stavke insert error:', stavkeErr);
-      alert('Greška pri spremanju stavki: ' + stavkeErr.message);
-      return;
-    }
-  }
-
-  // Update narudzba
-  const { error: updateErr } = await sb.from('narudzbe').update({
-    status,
-    ukupni_iznos: ukupno,
-    napomena: napomena || null,
-    datum_predavanja: status === 'predano' ? new Date().toISOString() : null,
-  }).eq('id', storeOrderId);
   
-  if (updateErr) {
-    console.error('persistOrder update error:', updateErr);
-    alert('Greška pri spremanju narudžbe: ' + updateErr.message);
+  if (stavke.length === 0) {
+    await showAlert('Upozorenje', 'Narudžba mora imati barem jednu stavku.', 'warning');
+    return false;
+  }
+  
+  // Pozovi Edge Function — server izračunava cijene i validira
+  const { data: sessionData } = await sb.auth.getSession();
+  const accessToken = sessionData?.session?.access_token;
+  const napomena = $('napomenaField')?.value?.trim() || '';
+  
+  try {
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/submit-order`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+        'apikey': SUPABASE_ANON_KEY
+      },
+      body: JSON.stringify({
+        narudzba_id: storeOrderId,
+        status,
+        napomena,
+        stavke
+      })
+    });
+    
+    const result = await response.json();
+    
+    if (!response.ok || !result.success) {
+      await showAlert('Greška', result.error || 'Nepoznata greška pri spremanju.', 'error');
+      return false;
+    }
+    
+    return true;
+  } catch (err) {
+    await showAlert('Greška', 'Greška mreže: ' + err.message, 'error');
+    return false;
   }
 }
 
@@ -2623,78 +2627,75 @@ async function submitDopuna(narudzbaId) {
   const napomena = $('dopunaNapomena')?.value?.trim() || '';
   
   if (rows.length === 0 && !napomena) {
-    alert('Dodajte barem jedan artikl ili napomenu.');
+    await showAlert('Upozorenje', 'Dodajte barem jedan artikl ili napomenu.', 'warning');
     return;
   }
   
-  const noveStavke = [];
+  const stavke = [];
   rows.forEach(row => {
     if (row.dataset.type === 'selected') {
-      // Artikl s liste
       const artiklId = parseInt(row.dataset.artiklId);
-      const cijena = parseFloat(row.dataset.cijena || 0);
       const kol = parseInt(row.querySelector('.qty-input')?.value || 0);
-      if (artiklId && cijena > 0 && kol > 0) {
-        noveStavke.push({
-          narudzba_id: narudzbaId,
-          artikl_id: artiklId,
-          kolicina: kol,
-          cijena,
-        });
+      if (artiklId && kol > 0) {
+        stavke.push({ artikl_id: artiklId, kolicina: kol, is_dopuna: true });
       }
     } else if (row.dataset.type === 'custom') {
-      // Custom artikl
       const textInput = row.querySelector('input[type="text"]');
       const numInputs = row.querySelectorAll('input[type="number"]');
       const naziv = textInput?.value?.trim();
-      const cijena = Math.max(0, parseFloat(numInputs[0]?.value || 0));
+      const extra_cijena = Math.max(0, parseFloat(numInputs[0]?.value || 0));
       const kolicina = Math.max(1, parseInt(numInputs[1]?.value || 1));
-      if (naziv && cijena > 0) {
-        noveStavke.push({
-          narudzba_id: narudzbaId,
+      if (naziv && extra_cijena > 0) {
+        stavke.push({
+          artikl_id: null,
           extra_naziv: '[DOPUNA] ' + naziv,
+          extra_cijena,
           kolicina,
-          cijena,
+          is_dopuna: true
         });
       }
-    } else if (row.dataset.type === 'list') {
-      // Dropdown koji nije odabran — skip
     }
   });
   
-  // Dodaj nove stavke
-  if (noveStavke.length) {
-    const { error: stavkeErr } = await sb.from('stavke_narudzbe').insert(noveStavke);
-    if (stavkeErr) {
-      alert('Greška pri dodavanju stavki: ' + stavkeErr.message);
-      return;
-    }
+  if (stavke.length === 0 && !napomena) {
+    await showAlert('Upozorenje', 'Nema artikala za dodavanje.', 'warning');
+    return;
   }
   
-  // Ažuriraj ukupni iznos i napomenu
-  const { data: sveStavke } = await sb.from('stavke_narudzbe').select('kolicina, cijena').eq('narudzba_id', narudzbaId);
-  const noviUkupno = (sveStavke || []).reduce((s, st) => s + (parseFloat(st.kolicina||0) * parseFloat(st.cijena||0)), 0);
+  const { data: sessionData } = await sb.auth.getSession();
+  const accessToken = sessionData?.session?.access_token;
   
   const oldNapomena = (await sb.from('narudzbe').select('napomena').eq('id', narudzbaId).maybeSingle())?.data?.napomena || '';
   const novaNapomena = napomena ? (oldNapomena ? oldNapomena + '\n[DOPUNA] ' + napomena : '[DOPUNA] ' + napomena) : oldNapomena;
   
-  await sb.from('narudzbe').update({
-    ukupni_iznos: noviUkupno,
-    napomena: novaNapomena || null,
-  }).eq('id', narudzbaId);
-  
-  // Logiraj dopunu
-  await sb.from('audit_log').insert({
-    user_email: currentUser?.email || '',
-    user_role: userRole || 'store',
-    akcija: 'DOPUNA_NARUDZBE',
-    entitet: 'narudzbe',
-    entitet_id: narudzbaId,
-    detalji: { stavke: noveStavke.length, napomena: napomena || null }
-  });
-  
-  alert('✅ Dopuna poslana! Administrator će vidjeti dodane artikle označene s [DOPUNA].');
-  loadStoreOrder();
+  try {
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/submit-order`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+        'apikey': SUPABASE_ANON_KEY
+      },
+      body: JSON.stringify({
+        narudzba_id: narudzbaId,
+        status: 'predano',
+        napomena: novaNapomena,
+        stavke
+      })
+    });
+    
+    const result = await response.json();
+    
+    if (!response.ok || !result.success) {
+      await showAlert('Greška', result.error || 'Greška pri slanju dopune.', 'error');
+      return;
+    }
+    
+    await showAlert('Dopuna poslana', 'Administrator će vidjeti dodane artikle označene s [DOPUNA].', 'success');
+    loadStoreOrder();
+  } catch (err) {
+    await showAlert('Greška', 'Greška mreže: ' + err.message, 'error');
+  }
 }
 
 async function vratiNaDoradu(narudzbaId, trgovinaNaziv) {
@@ -2784,14 +2785,14 @@ async function loadLogovi() {
   
   for (const l of logs) {
     const datum = new Date(l.created_at).toLocaleString('hr-HR', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
-    const detalji = l.detalji ? JSON.stringify(l.detalji).substring(0, 80) : '—';
+    const detalji = l.detalji ? escHtml(JSON.stringify(l.detalji).substring(0, 80)) : '—';
     html += `<tr>
       <td class="text-muted" style="white-space:nowrap">${datum}</td>
       <td class="fw-bold">${escHtml(l.user_email || '—')}</td>
       <td>${l.user_role === 'admin' ? '<span class="badge badge-ok">Admin</span>' : '<span class="badge badge-draft">Store</span>'}</td>
       <td>${akcijaLabels[l.akcija] || escHtml(l.akcija)}</td>
       <td class="text-muted">${escHtml(l.entitet || '')} #${l.entitet_id || ''}</td>
-      <td class="text-muted" style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(detalji)}</td>
+      <td class="text-muted" style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${detalji}</td>
     </tr>`;
   }
   html += '</tbody></table>';
