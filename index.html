@@ -348,14 +348,14 @@ thead th{color:white!important;background:var(--jb)!important;border-bottom:none
             <div class="page-title">Narudžbe</div>
             <div class="page-sub">Pregled i izvoz narudžbi po periodima</div>
           </div>
-          <button class="btn btn-primary" onclick="exportFilteredNarudzbe()" id="btnExportFiltered" style="white-space:nowrap">📥 Izvoz u Excel</button>
+          <button class="btn btn-primary" onclick="exportExcelFromNarudzbe()">📊 Izvoz u Excel</button>
         </div>
-        <div class="filter-row" style="gap:6px;flex-wrap:wrap;align-items:center">
-          <select id="filterPeriod" onchange="loadAdminNarudzbe()" autocomplete="off"
-            style="padding:7px 10px;border:1.5px solid var(--jbr);border-radius:5px;font-size:12px;font-family:'Inter','Verdana',sans-serif;min-width:180px;background:white">
+        <div class="filter-row" id="narudzbeFilters">
+          <select class="filter-select" id="filterPeriodSelect" onchange="loadAdminNarudzbe()" style="min-width:200px">
             <option value="">Učitavanje...</option>
           </select>
-          <div style="width:1px;height:24px;background:var(--jbr);margin:0 4px"></div>
+        </div>
+        <div class="filter-row" style="gap:4px;margin-top:-6px">
           <button class="btn filter-btn active" onclick="setDrzavaFilter('', this)">Sve</button>
           <button class="btn filter-btn" onclick="setDrzavaFilter('HR', this)">HR</button>
           <button class="btn filter-btn" onclick="setDrzavaFilter('BA', this)">BA</button>
@@ -768,7 +768,12 @@ function showPromptModal(title, body, confirmText = 'Potvrdi') {
   return new Promise(resolve => {
     _modalResolve = resolve;
     $('customAlertTitle').textContent = title;
+    // SIGURNA OPCIJA: textContent default, innerHTML samo za hardcoded HTML
+  if (typeof body === 'string' && body.trim().startsWith('<')) {
     $('customAlertBody').innerHTML = body;
+  } else {
+    $('customAlertBody').textContent = body;
+  }
     $('customAlertInput').style.display = 'block';
     $('customAlertTextarea').value = '';
     $('customAlertActions').innerHTML = `
@@ -1024,47 +1029,40 @@ async function loadAdminDashboard() {
 // ═══════════════════════════════════════════════════════
 // ADMIN NARUDŽBE
 // ═══════════════════════════════════════════════════════
-let allPeriods = [];
-
-async function loadPeriodFilter() {
-  const { data: periodi } = await sb.from('period_settings').select('*').order('godina', { ascending: false }).order('id', { ascending: false });
-  allPeriods = periodi || [];
-  
-  const sel = $('filterPeriod');
-  if (!sel) return;
-  
-  let html = '<option value="all">Svi periodi</option>';
-  for (const p of allPeriods) {
-    const label = `${escHtml(p.mjesec)}${p.aktivan ? ' ● AKTIVAN' : ''}`;
-    const val = `${p.mjesec}|${p.godina}`;
-    const selected = (activePeriod && p.mjesec === activePeriod.mjesec && p.godina === activePeriod.godina) ? ' selected' : '';
-    html += `<option value="${val}"${selected}>${label}</option>`;
-  }
-  sel.innerHTML = html;
-}
-
 async function loadAdminNarudzbe() {
-  // Učitaj period filter ako još nije
-  if (!allPeriods.length) await loadPeriodFilter();
+  // Popuni period dropdown ako je prazan
+  const periodSelect = $('filterPeriodSelect');
+  if (periodSelect && periodSelect.options.length <= 1 && periodSelect.options[0]?.textContent === 'Učitavanje...') {
+    const { data: periodi } = await sb.from('period_settings').select('*').order('id', { ascending: false });
+    periodSelect.innerHTML = '';
+    for (const p of (periodi || [])) {
+      const opt = document.createElement('option');
+      opt.value = JSON.stringify({ mjesec: p.mjesec, godina: p.godina });
+      opt.textContent = `${p.mjesec} ${p.godina}${p.aktivan ? ' • AKTIVAN' : ''}`;
+      if (p.aktivan) opt.selected = true;
+      periodSelect.appendChild(opt);
+    }
+  }
 
-  const drzava = $('filterDrzava')?.value || '';
-  const status = $('filterStatus')?.value || '';
-  const search = ($('searchNarudzbe')?.value || '').toLowerCase();
-  const periodVal = $('filterPeriod')?.value || '';
+  // Odredi koji period koristiti
+  let useMjesec = activePeriod?.mjesec;
+  let useGodina = activePeriod?.godina;
+  try {
+    const sel = JSON.parse(periodSelect?.value || '{}');
+    if (sel.mjesec) { useMjesec = sel.mjesec; useGodina = sel.godina; }
+  } catch(e) {}
+
+  if (!useMjesec) return;
+
+  const drzava = $('filterDrzava').value;
+  const status = $('filterStatus').value;
+  const search = $('searchNarudzbe').value.toLowerCase();
 
   let q = sb.from('narudzbe')
     .select('*, trgovine(naziv, drzava, email, minimalni_iznos)')
+    .eq('period_mjesec', useMjesec)
+    .eq('period_godina', useGodina)
     .order('updated_at', { ascending: false });
-
-  // Period filter
-  if (periodVal && periodVal !== 'all') {
-    const [mjesec, godina] = periodVal.split('|');
-    q = q.eq('period_mjesec', mjesec).eq('period_godina', parseInt(godina));
-  } else if (periodVal === 'all') {
-    // Bez period filtera — dohvati sve
-  } else if (activePeriod) {
-    q = q.eq('period_mjesec', activePeriod.mjesec).eq('period_godina', activePeriod.godina);
-  }
 
   if (status) q = q.eq('status', status);
 
@@ -1083,10 +1081,8 @@ async function loadAdminNarudzbe() {
   }
 
   const valuta = {HR:'EUR',BA:'KM',SI:'EUR',RS:'RSD'};
-  const showPeriodCol = periodVal === 'all';
-  
   let html = `<table id="tblAdminNarudzbe" class="order-items-table"><thead><tr>
-    <th>Poslovnica ${sortHeader(0,"str")}</th><th>Država ${sortHeader(1,"str")}</th>${showPeriodCol ? `<th>Period ${sortHeader(2,"str")}</th>` : ''}<th>Iznos ${sortHeader(showPeriodCol?3:2,"num")}</th><th>Min ${sortHeader(showPeriodCol?4:3,"num")}</th><th>Status ${sortHeader(showPeriodCol?5:4,"str")}</th><th>Ažurirano ${sortHeader(showPeriodCol?6:5,"str")}</th><th></th>
+    <th>Poslovnica ${sortHeader(0,"str")}</th><th>Država ${sortHeader(1,"str")}</th><th>Iznos ${sortHeader(2,"num")}</th><th>Min ${sortHeader(3,"num")}</th><th>Status ${sortHeader(4,"str")}</th><th>Ažurirano ${sortHeader(5,"str")}</th><th></th>
   </tr></thead><tbody>`;
 
   for (const n of filtered) {
@@ -1099,13 +1095,10 @@ async function loadAdminNarudzbe() {
     html += `<tr>
       <td class="fw-bold">${escHtml(n.trgovine?.naziv||'—')}</td>
       <td>${getBadgeDrzava(drzavaKod)}</td>
-      ${showPeriodCol ? `<td class="text-muted" style="font-size:11px">${escHtml(n.period_mjesec || '')}</td>` : ''}
       <td class="fw-bold" style="color:${minOk ? 'var(--jok)' : 'var(--jwa)'}">${iznos.toFixed(2)} ${cur}</td>
       <td class="text-muted">${min.toFixed(2)} ${cur}</td>
       <td>${n.status === 'predano'
         ? '<span class="badge badge-ok">✓ Predano</span>'
-        : n.status === 'poništeno'
-        ? '<span class="badge badge-danger">✕ Poništeno</span>'
         : '<span class="badge badge-draft">Nacrt</span>'}</td>
       <td class="text-muted">${fmtDate(n.updated_at)}</td>
       <td><button class="btn-edit btn" onclick="viewNarudzba(${n.id})">Detalji</button></td>
@@ -1217,8 +1210,8 @@ async function loadArtikli() {
 
   let html = `<table id="tblArtikli"><thead><tr>
     <th>Šifra ${sortHeader(0,'str')}</th><th>Naziv ${sortHeader(1,'str')}</th><th>Kategorija ${sortHeader(2,'str')}</th>
-    <th>Pakiranje</th><th>HR (EUR) ${sortHeader(4,'num')}</th><th>BA (KM) ${sortHeader(5,'num')}</th><th>SI (EUR) ${sortHeader(6,'num')}</th><th>RS (RSD) ${sortHeader(7,'num')}</th>
-    <th>Max kol. ${sortHeader(8,'num')}</th><th>Status</th><th></th>
+    <th>Pakiranje ${sortHeader(3,'str')}</th><th>HR (EUR) ${sortHeader(4,'num')}</th><th>BA (KM) ${sortHeader(5,'num')}</th><th>SI (EUR) ${sortHeader(6,'num')}</th><th>RS (RSD) ${sortHeader(7,'num')}</th>
+    <th>Max kol. ${sortHeader(8,'num')}</th><th>Status ${sortHeader(9,'str')}</th><th></th>
   </tr></thead><tbody>`;
 
   for (const a of data) {
@@ -1233,10 +1226,10 @@ async function loadArtikli() {
       <td>${a.cijena_rs ? parseFloat(a.cijena_rs).toFixed(2) : '—'}</td>
       <td class="text-center">${a.max_kolicina || '—'}</td>
       <td>${a.aktivan ? '<span class="badge badge-ok">Aktivan</span>' : '<span class="badge badge-draft">Neaktivan</span>'}</td>
-      <td><div class="d-flex gap-8" style="white-space:nowrap">
-        <button class="btn btn-secondary btn-sm" onclick="openArtiklModal(${a.id})">Uredi</button>
+      <td>
+        <button class="btn btn-secondary btn-sm" onclick="openArtiklModal(${a.id})" style="margin-right:4px">Uredi</button>
         <button class="btn btn-danger btn-sm" onclick="toggleArtikl(${a.id}, ${a.aktivan})">${a.aktivan ? 'Deaktiviraj' : 'Aktiviraj'}</button>
-      </div></td>
+      </td>
     </tr>`;
   }
   html += '</tbody></table>';
@@ -1300,7 +1293,7 @@ async function saveArtikl() {
 
 async function toggleArtikl(id, trenutnoAktivan) {
   const akcija = trenutnoAktivan ? 'deaktivirati' : 'aktivirati';
-  if (!(await showConfirm('Potvrda', `Želite li ${akcija} ovaj artikl?`))) return;
+  if (!confirm(`Želite li ${akcija} ovaj artikl?`)) return;
   await sb.from('artikli').update({ aktivan: !trenutnoAktivan }).eq('id', id);
   loadArtikli();
 }
@@ -1390,6 +1383,13 @@ function openTrgovinaModal(id = null) {
     $('trTelefon').value = t.telefon || '';
     $('trEmail').value = t.email || '';
     $('trMinIznos').value = t.minimalni_iznos || '';
+    
+    // Ako trgovina NEMA user_id, prikaži polje za lozinku (kao kod nove)
+    if (!t.user_id) {
+      $('trPasswordGroup').style.display = 'block';
+      $('trPasswordChangeGroup').style.display = 'none';
+    }
+    
     showModal('trgovinaModal');
   });
 }
@@ -1447,7 +1447,7 @@ async function saveTrgovina() {
       if (!response.ok || !result.success) {
         // Rollback - obriši kreiranu trgovinu
         await sb.from('trgovine').delete().eq('id', novaTrgovina.id);
-        await showAlert('Greška', 'Greška pri kreiranju korisnika: ' + (result.error || 'Nepoznata greška') + 
+        alert('❌ Greška pri kreiranju korisnika: ' + (result.error || 'Nepoznata greška') + 
               '\n\nProvjerite:\n- Je li Edge Function deployed?\n- Je li email već u upotrebi?');
         return;
       }
@@ -1456,20 +1456,66 @@ async function saveTrgovina() {
     } catch (fetchErr) {
       // Rollback ako fetch padne
       await sb.from('trgovine').delete().eq('id', novaTrgovina.id);
-      await showAlert('Greška', 'Greška mreže: ' + fetchErr.message + 
-            '\n\nProvjerite je li Edge Function "create-store-user" deployed u Supabase Dashboardu.', 'error');
+      alert('❌ Greška mreže: ' + fetchErr.message + 
+            '\n\nProvjerite je li Edge Function "create-store-user" deployed u Supabase Dashboardu.');
       return;
     }
   } else {
-    // Uredi postojeću
-    const { error } = await sb.from('trgovine').update(payload).eq('id', editingTrgovinaId);
-    if (error) { showAlert('Greška', error.message, 'error'); return; }
+    // Uredi postojeću — provjeri ima li user_id
+    const { data: existingTrg } = await sb.from('trgovine').select('user_id, email').eq('id', editingTrgovinaId).maybeSingle();
     
-    // Promjena lozinke ako je unesena - preko Edge Function
-    const novaLoz = $('trNovaLozinka')?.value?.trim();
-    if (novaLoz && novaLoz.length >= 6) {
-      const { data: trData } = await sb.from('trgovine').select('user_id, email').eq('id', editingTrgovinaId).maybeSingle();
-      if (trData?.user_id) {
+    // Ako NEMA user_id, trebamo kreirati auth usera (kao kod nove poslovnice)
+    if (!existingTrg?.user_id) {
+      const pass = $('trPassword').value;
+      if (!pass || pass.length < 6) { 
+        await showAlert('Upozorenje', 'Lozinka mora imati najmanje 6 znakova za kreiranje korisničkog računa!', 'warning'); 
+        return; 
+      }
+      
+      // Prvo ažuriraj podatke poslovnice
+      const { error: updErr } = await sb.from('trgovine').update(payload).eq('id', editingTrgovinaId);
+      if (updErr) { await showAlert('Greška', updErr.message, 'error'); return; }
+      
+      // Kreiraj auth usera kroz Edge Function
+      const { data: sessionData } = await sb.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      
+      try {
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/create-store-user`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
+            'apikey': SUPABASE_ANON_KEY
+          },
+          body: JSON.stringify({
+            email: payload.email,
+            password: pass,
+            trgovina_id: editingTrgovinaId
+          })
+        });
+        
+        const result = await response.json();
+        
+        if (!response.ok || !result.success) {
+          await showAlert('Upozorenje', 'Podaci poslovnice ažurirani, ali korisnički račun nije kreiran: ' + (result.error || 'Nepoznata greška'), 'warning');
+        } else {
+          closeModal('trgovinaModal');
+          loadTrgovine();
+          showCredentials(payload.email, pass);
+          return;
+        }
+      } catch (fetchErr) {
+        await showAlert('Upozorenje', 'Podaci ažurirani. Greška pri kreiranju korisnika: ' + fetchErr.message, 'warning');
+      }
+    } else {
+      // Ima user_id — standardni update
+      const { error } = await sb.from('trgovine').update(payload).eq('id', editingTrgovinaId);
+      if (error) { await showAlert('Greška', error.message, 'error'); return; }
+      
+      // Promjena lozinke ako je unesena - preko Edge Function
+      const novaLoz = $('trNovaLozinka')?.value?.trim();
+      if (novaLoz && novaLoz.length >= 6) {
         const { data: sessionData } = await sb.auth.getSession();
         const accessToken = sessionData?.session?.access_token;
         
@@ -1482,7 +1528,7 @@ async function saveTrgovina() {
               'apikey': SUPABASE_ANON_KEY
             },
             body: JSON.stringify({
-              user_id: trData.user_id,
+              user_id: existingTrg.user_id,
               new_password: novaLoz
             })
           });
@@ -1490,15 +1536,15 @@ async function saveTrgovina() {
           const result = await response.json();
           
           if (!response.ok || !result.success) {
-            showAlert('Upozorenje', 'Podaci poslovnice ažurirani ali lozinka nije promijenjena: ' + (result.error || 'Greška'), 'warning');
+            await showAlert('Upozorenje', 'Podaci poslovnice ažurirani ali lozinka nije promijenjena: ' + (result.error || 'Greška'), 'warning');
           } else {
             closeModal('trgovinaModal');
             loadTrgovine();
-            showCredentials(trData.email, novaLoz, true);
+            showCredentials(existingTrg.email, novaLoz, true);
             return;
           }
         } catch (fetchErr) {
-          showAlert('Upozorenje', 'Podaci ažurirani. Greška pri promjeni lozinke: ' + fetchErr.message, 'warning');
+          await showAlert('Upozorenje', 'Podaci ažurirani. Greška pri promjeni lozinke: ' + fetchErr.message, 'warning');
         }
       }
     }
@@ -1509,19 +1555,14 @@ async function saveTrgovina() {
 }
 
 async function toggleTrgovina(id, trenutnoAktivan) {
-  const akcija = trenutnoAktivan ? 'deaktivirati' : 'aktivirati';
-  const poruka = trenutnoAktivan 
-    ? 'Deaktivirana poslovnica neće moći kreirati nove narudžbe, ali postojeći podaci ostaju.' 
-    : 'Aktivirana poslovnica ponovno može koristiti aplikaciju.';
-  const ok = await showConfirm('Potvrda', `Želite li ${akcija} ovu poslovnicu?\n\n${poruka}`);
-  if (!ok) return;
+  if (!confirm(`Želite li ${trenutnoAktivan ? 'deaktivirati' : 'aktivirati'} ovu poslovnicu?\n\n` +
+    `${trenutnoAktivan ? 'Deaktivirana poslovnica neće moći kreirati nove narudžbe, ali postojeći podaci ostaju.' : 'Aktivirana poslovnica ponovno može koristiti aplikaciju.'}`)) return;
   await sb.from('trgovine').update({ aktivan: !trenutnoAktivan }).eq('id', id);
   loadTrgovine();
 }
 
 async function deleteTrgovina(id, naziv) {
-  const ok1 = await showConfirm('Brisanje poslovnice', `TRAJNO obrisati poslovnicu "${naziv}"?\n\nOvo će obrisati:\n- Poslovnicu iz baze\n- Korisnički račun\n- Sve narudžbe i stavke\n\nOvu akciju NIJE moguće poništiti!`, 'Obriši', 'Odustani');
-  if (!ok1) return;
+  if (!confirm(`⚠️ TRAJNO obrisati poslovnicu "${naziv}"?\n\nOvo će obrisati:\n- Poslovnicu iz baze\n- Korisnički račun\n- Sve narudžbe i stavke\n\nOvu akciju NIJE moguće poništiti!`)) return;
   if (!(await showConfirm('Potvrda', `Zaista obrisati "${naziv}"?`))) return;
   
   // Dohvati user_id
@@ -1551,9 +1592,9 @@ async function deleteTrgovina(id, naziv) {
   const { error } = await sb.from('trgovine').delete().eq('id', id);
   
   if (error) {
-    await showAlert('Greška', 'Greška pri brisanju: ' + error.message, 'error');
+    alert('Greška pri brisanju: ' + error.message);
   } else {
-    await showAlert('Obrisano', 'Poslovnica je obrisana.', 'success');
+    alert('✅ Poslovnica obrisana.');
     loadTrgovine();
   }
 }
@@ -1602,12 +1643,12 @@ async function savePeriod() {
     aktivan: true,
   };
 
-  if (!payload.mjesec || !payload.deadline_datum) { await showAlert('Nepotpuni podaci', 'Naziv mjeseca i deadline su obavezni.', 'warning'); return; }
+  if (!payload.mjesec || !payload.deadline_datum) { alert('Naziv mjeseca i deadline su obavezni!'); return; }
   
   // Provjeri da deadline nije u prošlosti
   const deadlineDate = new Date(`${payload.deadline_datum}T${payload.deadline_vrijeme}`);
   if (deadlineDate <= new Date()) {
-    const ok = await showConfirm('Upozorenje', 'Uneseni deadline je u prošlosti! Jeste li sigurni?', 'Da', 'Odustani');
+    const ok = confirm('⚠️ Uneseni deadline je u prošlosti! Jeste li sigurni?');
     if (!ok) return;
   }
 
@@ -1635,8 +1676,7 @@ async function exportExcel(drzava) {
     .from('narudzbe')
     .select('*, trgovine(naziv, drzava, grad, email, kontakt_osoba, telefon, minimalni_iznos)')
     .eq('period_mjesec', activePeriod.mjesec)
-    .eq('period_godina', activePeriod.godina)
-    .neq('status', 'poništeno');
+    .eq('period_godina', activePeriod.godina);
 
   const dNar = (narudzbe || []).filter(n => n.trgovine?.drzava === drzava);
 
@@ -1714,122 +1754,13 @@ async function exportExcel(drzava) {
   if (btn) { btn.textContent = `✅ Preuzeto ${drzava}`; btn.classList.add('done'); btn.disabled = false; }
 }
 
-async function exportFilteredNarudzbe() {
-  const btn = $('btnExportFiltered');
-  if (btn) { btn.textContent = '⏳ Priprema...'; btn.disabled = true; }
-
-  const periodVal = $('filterPeriod')?.value || '';
+async function exportExcelFromNarudzbe() {
   const drzava = $('filterDrzava')?.value || '';
-
-  let q = sb.from('narudzbe')
-    .select('*, trgovine(naziv, drzava, grad, email, kontakt_osoba, telefon, minimalni_iznos)')
-    .neq('status', 'poništeno')
-    .order('period_godina', { ascending: false })
-    .order('updated_at', { ascending: false });
-
-  let periodLabel = 'Svi periodi';
-  if (periodVal && periodVal !== 'all') {
-    const [mjesec, godina] = periodVal.split('|');
-    q = q.eq('period_mjesec', mjesec).eq('period_godina', parseInt(godina));
-    periodLabel = mjesec;
-  } else if (!periodVal && activePeriod) {
-    q = q.eq('period_mjesec', activePeriod.mjesec).eq('period_godina', activePeriod.godina);
-    periodLabel = activePeriod.mjesec;
-  }
-
-  const { data: narudzbe } = await q;
-  let filtered = narudzbe || [];
-  if (drzava) filtered = filtered.filter(n => n.trgovine?.drzava === drzava);
-
-  if (!filtered.length) {
-    await showAlert('Nema podataka', 'Nema narudžbi za odabrane filtere.', 'warning');
-    if (btn) { btn.textContent = '📥 Izvoz u Excel'; btn.disabled = false; }
+  if (!drzava) {
+    await showAlert('Odaberite državu', 'Za izvoz u Excel, prvo filtrirajte po državi (HR, BA, SI ili RS).', 'info');
     return;
   }
-
-  const valuta = {HR:'EUR',BA:'KM',SI:'EUR',RS:'RSD'};
-  const wb = XLSX.utils.book_new();
-
-  // Sheet 1: Sažetak svih narudžbi
-  const sazetakData = [
-    ['JYSK — Narudžbe uredskog materijala'],
-    [`Period: ${periodLabel}${drzava ? ' | Država: ' + drzava : ' | Sve države'}`],
-    [`Generirano: ${new Date().toLocaleDateString('hr-HR')} u ${new Date().toLocaleTimeString('hr-HR')}`],
-    [],
-    ['Poslovnica', 'Država', 'Grad', 'Period', 'Kontakt', 'Email', 'Iznos', 'Valuta', 'Status', 'Napomena'],
-  ];
-
-  let ukupnoSve = 0;
-  for (const n of filtered) {
-    const drz = n.trgovine?.drzava || '';
-    const cur = valuta[drz] || '';
-    const iznos = parseFloat(n.ukupni_iznos || 0);
-    sazetakData.push([
-      n.trgovine?.naziv || '',
-      drz,
-      n.trgovine?.grad || '',
-      n.period_mjesec || '',
-      n.trgovine?.kontakt_osoba || '',
-      n.trgovine?.email || '',
-      iznos,
-      cur,
-      n.status === 'predano' ? 'Predano' : n.status === 'poništeno' ? 'Poništeno' : 'Nacrt',
-      n.napomena || '',
-    ]);
-    ukupnoSve += iznos;
-  }
-  sazetakData.push([]);
-  sazetakData.push(['', '', '', '', '', 'UKUPNO:', ukupnoSve, '', '', '']);
-
-  const ws1 = XLSX.utils.aoa_to_sheet(sazetakData);
-  ws1['!cols'] = [{wch:25},{wch:6},{wch:15},{wch:20},{wch:20},{wch:28},{wch:12},{wch:6},{wch:10},{wch:30}];
-  XLSX.utils.book_append_sheet(wb, ws1, 'Sažetak');
-
-  // Sheet 2: Sve stavke detaljno
-  const detaljData = [
-    ['Poslovnica', 'Država', 'Period', 'Šifra', 'Artikl', 'Kategorija', 'Količina', 'Cijena', 'Ukupno', 'Valuta'],
-  ];
-
-  for (const n of filtered) {
-    const { data: stavke } = await sb.from('stavke_narudzbe')
-      .select('*, artikli(naziv, sifra, kategorija)')
-      .eq('narudzba_id', n.id);
-
-    const drz = n.trgovine?.drzava || '';
-    const cur = valuta[drz] || '';
-
-    for (const s of (stavke || [])) {
-      detaljData.push([
-        n.trgovine?.naziv || '',
-        drz,
-        n.period_mjesec || '',
-        s.artikli?.sifra || (s.extra_naziv ? 'EXTRA' : ''),
-        s.artikli?.naziv || s.extra_naziv || '',
-        s.artikli?.kategorija || '—',
-        s.kolicina,
-        parseFloat(s.cijena || 0),
-        parseFloat(s.cijena || 0) * parseInt(s.kolicina || 0),
-        cur,
-      ]);
-    }
-  }
-
-  const ws2 = XLSX.utils.aoa_to_sheet(detaljData);
-  ws2['!cols'] = [{wch:25},{wch:6},{wch:20},{wch:12},{wch:35},{wch:15},{wch:10},{wch:10},{wch:10},{wch:6}];
-  XLSX.utils.book_append_sheet(wb, ws2, 'Stavke detaljno');
-
-  const filenameParts = ['JYSK_Narudzbe'];
-  if (drzava) filenameParts.push(drzava);
-  if (periodVal && periodVal !== 'all') {
-    const [mjesec] = periodVal.split('|');
-    filenameParts.push(mjesec.split(' ')[0]);
-  } else {
-    filenameParts.push('svi_periodi');
-  }
-  XLSX.writeFile(wb, filenameParts.join('_') + '.xlsx');
-
-  if (btn) { btn.textContent = '📥 Izvoz u Excel'; btn.disabled = false; }
-  await showAlert('Izvoz', 'Excel datoteka je preuzeta.', 'success');
+  await exportExcel(drzava);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1846,30 +1777,49 @@ async function loadStoreDashboard() {
 
   // Countdown
   renderCountdown();
+  
+  // Provjeri ima li vraćenu narudžbu
+  if (activePeriod) {
+    const { data: vracena } = await sb.from('narudzbe')
+      .select('napomena, status')
+      .eq('trgovina_id', userTrgovina.id)
+      .eq('period_mjesec', activePeriod.mjesec)
+      .eq('period_godina', activePeriod.godina)
+      .eq('status', 'nacrt')
+      .maybeSingle();
+    
+    if (vracena?.napomena?.includes('[VRAĆENO NA DORADU]')) {
+      const razlog = vracena.napomena.replace('[VRAĆENO NA DORADU] ', '');
+      $('storeCountdown').insertAdjacentHTML('afterend', `
+        <div class="alert" style="background:#fff3cd;border:2px solid #f59e0b;color:#92400e;margin-bottom:16px;border-radius:8px;padding:16px">
+          <div style="font-weight:700;font-size:14px;margin-bottom:6px">⚠️ Narudžba vraćena na doradu!</div>
+          <div style="font-size:13px">Administrator je vratio vašu narudžbu. Razlog: <strong>${escHtml(razlog)}</strong></div>
+          <div style="margin-top:10px">
+            <button class="btn btn-primary btn-sm" onclick="navTo('store-narudzba', document.querySelectorAll('.nav-item')[1])">✏️ Uredi narudžbu</button>
+          </div>
+        </div>`);
+    }
+  }
 
   if (!activePeriod) {
     $('storeCurrentOrder').innerHTML = '<div class="alert alert-info">Trenutno nema aktivnog perioda naručivanja.</div>';
     return;
   }
 
-  // Dohvati trenutnu narudžbu (ignoriraj poništene)
-  const { data: narList } = await sb
+  // Dohvati trenutnu narudžbu
+  const { data: narudzba } = await sb
     .from('narudzbe')
     .select('*')
     .eq('trgovina_id', userTrgovina.id)
     .eq('period_mjesec', activePeriod.mjesec)
     .eq('period_godina', activePeriod.godina)
-    .neq('status', 'poništeno')
-    .order('created_at', { ascending: false })
-    .limit(1);
-
-  const narudzba = narList?.[0] || null;
+    .maybeSingle();
 
   const valuta = {HR:'EUR',BA:'KM',SI:'EUR',RS:'RSD'};
   const cur = valuta[userTrgovina.drzava] || '';
   const min = parseFloat(userTrgovina.minimalni_iznos || 0);
 
-  if (!narudzba) {
+  if (!narudzba || narudzba.status === 'poništeno') {
     $('storeCurrentOrder').innerHTML = `
       <div class="card">
         <div class="card-title">Narudžba za ${escHtml(activePeriod.mjesec)}</div>
@@ -1885,19 +1835,6 @@ async function loadStoreDashboard() {
   const iznos = parseFloat(narudzba.ukupni_iznos || 0);
   const progress = min > 0 ? Math.min((iznos / min) * 100, 100) : 100;
   const progressClass = progress >= 100 ? 'ok' : progress >= 70 ? 'warn' : '';
-
-  // Banner za vraćenu narudžbu — samo ako je u nacrtu
-  if (narudzba.status === 'nacrt' && narudzba.napomena?.includes('[VRAĆENO NA DORADU]')) {
-    const razlog = narudzba.napomena.replace('[VRAĆENO NA DORADU] ', '');
-    $('storeCountdown').insertAdjacentHTML('afterend', `
-      <div class="alert" style="background:#fff3cd;border:2px solid #f59e0b;color:#92400e;margin-bottom:16px;border-radius:8px;padding:16px">
-        <div style="font-weight:700;font-size:14px;margin-bottom:6px">⚠️ Narudžba vraćena na doradu!</div>
-        <div style="font-size:13px">Administrator je vratio vašu narudžbu. Razlog: <strong>${escHtml(razlog)}</strong></div>
-        <div style="margin-top:10px">
-          <button class="btn btn-primary btn-sm" onclick="navTo('store-narudzba', document.querySelectorAll('.nav-item')[1])">✏️ Uredi narudžbu</button>
-        </div>
-      </div>`);
-  }
 
   $('storeCurrentOrder').innerHTML = `
     <div class="card">
@@ -1987,18 +1924,14 @@ async function loadStoreOrder() {
 
   $('storeOrderPeriodSub').textContent = `Period: ${activePeriod.mjesec} | Deadline: ${fmtDate(activePeriod.deadline_datum)}`;
 
-  // Dohvati ili kreiraj narudžbu (ignoriraj poništene)
-  let { data: narudzbe } = await sb
+  // Dohvati ili kreiraj narudžbu
+  let { data: narudzba } = await sb
     .from('narudzbe')
     .select('*')
     .eq('trgovina_id', userTrgovina.id)
     .eq('period_mjesec', activePeriod.mjesec)
     .eq('period_godina', activePeriod.godina)
-    .neq('status', 'poništeno')
-    .order('created_at', { ascending: false })
-    .limit(1);
-
-  let narudzba = narudzbe?.[0] || null;
+    .maybeSingle();
 
   if (!narudzba) {
     // Dohvati točne nazive kolona iz period_settings
@@ -2212,7 +2145,7 @@ function renderOrderForm(narudzba, artikli) {
     <div class="card">
       <div class="card-title">Napomena</div>
       <textarea id="napomenaField" autocomplete="off" style="width:100%;padding:9px;border:1.5px solid var(--jbr);border-radius:4px;font-family:'Inter','Verdana',sans-serif;font-size:12px;resize:vertical;min-height:60px" 
-        placeholder="Opcionalna napomena za admina...">${escHtml((narudzba.napomena || '').replace(/\[VRAĆENO NA DORADU\]\s*/g, ''))}</textarea>
+        placeholder="Opcionalna napomena za admina...">${escHtml(narudzba.napomena || '')}</textarea>
     </div>
 
     <div class="order-total" id="orderTotalBar">
@@ -2243,7 +2176,7 @@ async function updateItem(artiklId, value, cijena, maxKolicina) {
   const kol = Math.max(0, parseInt(value) || 0);
 
   if (kol > maxKolicina) {
-    showAlert('Ograničenje', `Maksimalna dozvoljena količina za ovaj artikl je ${maxKolicina}.`, 'warning');
+    alert(`Maksimalna dozvoljena količina za ovaj artikl je ${maxKolicina}!`);
     const input = document.querySelector(`#row-${artiklId} input`);
     if (input) input.value = maxKolicina;
     storeOrderItems[artiklId] = { ...(storeOrderItems[artiklId] || {}), kolicina: maxKolicina, cijena };
@@ -2439,10 +2372,10 @@ function removeExtra(idx) {
 }
 
 async function saveOrderDraft() {
-  const success = await persistOrder('nacrt');
-  if (!success) return;
+  await persistOrder('nacrt');
+  // Audit log se sada radi u Edge Function
   
-  await showAlert('Spremljeno', 'Nacrt je spremljen!', 'success');
+  alert('✅ Nacrt je spremljen!');
 }
 
 async function submitOrder() {
@@ -2450,7 +2383,7 @@ async function submitOrder() {
   if (activePeriod) {
     const deadline = new Date(`${activePeriod.deadline_datum}T${activePeriod.deadline_vrijeme}`);
     if (new Date() > deadline) {
-      await showAlert('Rok istekao', 'Rok za predaju narudžbe je istekao!\n\nKontaktirajte admina ako trebate produženje.', 'warning');
+      alert('⚠️ Rok za predaju narudžbe je istekao!\n\nKontaktirajte admina ako trebate produženje.');
       return;
     }
   }
@@ -2462,14 +2395,14 @@ async function submitOrder() {
   if (ukupno < min) {
     const valuta = {HR:'EUR',BA:'KM',SI:'EUR',RS:'RSD'};
     const cur = valuta[userTrgovina.drzava] || '';
-    const ok = await showConfirm('Ispod minimuma', `Iznos narudžbe (${ukupno.toFixed(2)} ${cur}) je manji od minimuma (${min.toFixed(2)} ${cur}).\n\nŽelite li svejedno predati narudžbu?`, 'Predaj', 'Odustani');
+    const ok = confirm(`⚠️ Iznos narudžbe (${ukupno.toFixed(2)} ${cur}) je manji od minimuma (${min.toFixed(2)} ${cur}).\n\nŽelite li svejedno predati narudžbu?`);
     if (!ok) return;
   }
 
-  const success = await persistOrder('predano');
-  if (!success) return;
+  await persistOrder('predano');
+  // Audit log se sada radi u Edge Function
   
-  await showAlert('Predano', 'Narudžba je uspješno predana!', 'success');
+  alert('✅ Narudžba je uspješno predana!');
   loadStoreDashboard();
   showPage('store-dashboard');
 }
@@ -2629,7 +2562,7 @@ Zabilježite podatke:`;
         ⚠️ Ove podatke proslijedite poslovnici. Nakon zatvaranja ovog prozora lozinka više neće biti vidljiva.
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end">
-        <button onclick="navigator.clipboard?.writeText('Email: ${email}\nLozinka: ${lozinka}').then(()=>showAlert('Kopirano','Podaci su kopirani u međuspremnik.','success'))" 
+        <button onclick="navigator.clipboard?.writeText('Email: ${email}\nLozinka: ${lozinka}').then(()=>alert('Kopirano!'))" 
           style="padding:8px 14px;background:#f0f4fb;border:1px solid #c5cfdf;border-radius:4px;cursor:pointer;font-family:'Inter','Verdana',sans-serif;font-size:11px">
           📋 Kopiraj
         </button>
@@ -2659,7 +2592,7 @@ async function editPeriodDeadline(periodId, currentDate, currentTime) {
   const { data: p } = await sb.from('period_settings').select('*').eq('aktivan', true).maybeSingle();
   activePeriod = p;
   
-  await showAlert('Ažurirano', 'Deadline je ažuriran!', 'success');
+  alert('✅ Deadline ažuriran!');
   loadPeriod();
 }
 
@@ -2837,8 +2770,7 @@ async function submitDopuna(narudzbaId) {
         narudzba_id: narudzbaId,
         status: 'predano',
         napomena: novaNapomena,
-        stavke,
-        mode: 'dopuna'
+        stavke
       })
     });
     
