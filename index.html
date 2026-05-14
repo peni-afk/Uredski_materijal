@@ -1600,7 +1600,7 @@ async function saveTrgovina() {
         const result = await response.json();
         
         if (!response.ok || !result.success) {
-          await showAlert('Upozorenje', 'Podaci poslovnice ažurirani, ali korisnički račun nije kreiran: ' + (result.error || 'Nepoznata greška'), 'warning');
+          await showAlert('Greška', '<div style="margin-bottom:8px">Podaci poslovnice ažurirani, ali korisnički račun nije kreiran:</div><div style="background:#f5f5f5;padding:8px;border-radius:4px;font-family:monospace;font-size:11px;margin-bottom:8px">' + escHtml(result.error || 'Nepoznata greška') + '</div><div style="font-size:11px;color:#5a6580">Provjerite je li Edge Function <strong>create-store-user</strong> ažurirana na najnoviju verziju.</div>', 'error');
         } else {
           closeModal('trgovinaModal');
           loadTrgovine();
