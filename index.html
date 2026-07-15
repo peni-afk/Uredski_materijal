@@ -2912,6 +2912,7 @@ async function submitDopuna(narudzbaId) {
         narudzba_id: narudzbaId,
         status: 'predano',
         napomena: novaNapomena,
+        mode: 'dopuna',
         stavke
       })
     });
@@ -2934,7 +2935,7 @@ async function vratiNaDoradu(narudzbaId, trgovinaNaziv) {
   closeModal('narudzbaDetailModal');
   const razlog = await showPromptModal(
     '🔄 Vrati na doradu',
-    `Narudžba od <strong>${trgovinaNaziv}</strong> će biti vraćena trgovini na doradu.<br><br>Unesite razlog (trgovina će ga vidjeti):`,
+    `<div>Narudžba od <strong>${escHtml(trgovinaNaziv)}</strong> će biti vraćena trgovini na doradu.<br><br>Unesite razlog (trgovina će ga vidjeti):</div>`,
     'Vrati na doradu'
   );
   if (!razlog) return;
@@ -2965,7 +2966,7 @@ async function ponistiNarudzbu(narudzbaId, trgovinaNaziv) {
   closeModal('narudzbaDetailModal');
   const razlog = await showPromptModal(
     '❌ Poništi narudžbu',
-    `Narudžba od <strong>${trgovinaNaziv}</strong> će biti poništena.<br><br>Trgovina će moći kreirati novu narudžbu za ovaj period.<br><br>Unesite razlog:`,
+    `<div>Narudžba od <strong>${escHtml(trgovinaNaziv)}</strong> će biti poništena.<br><br>Trgovina će moći kreirati novu narudžbu za ovaj period.<br><br>Unesite razlog:</div>`,
     'Poništi narudžbu'
   );
   if (!razlog) return;
