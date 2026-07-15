@@ -454,6 +454,7 @@ thead th{color:white!important;background:var(--jb)!important;border-bottom:none
           </div>
         </div>
         <div id="storeCountdown"></div>
+        <div id="vracenaBanner"></div>
         <div id="storeCurrentOrder"><div class="loading">Učitavanje...</div></div>
       </div>
 
@@ -835,6 +836,25 @@ function getStatusBadge(status) {
   if (status === 'predano') return '<span class="badge badge-ok">✓ Predano</span>';
   if (status === 'poništeno') return '<span class="badge" style="background:#fee2e2;color:#b91c1c;border-radius:20px;padding:4px 10px">✕ Poništeno</span>';
   return '<span class="badge badge-draft">Nacrt</span>';
+}
+
+function formatNapomena(napomena) {
+  // Prepoznaj interne prefikse i prikaži ih kao lijepe oznake umjesto sirovih [ZAGRADA]
+  const markeri = [
+    { tag: '[VRAĆENO NA DORADU]', label: 'Vraćeno na doradu', bg: '#fff3cd', fg: '#92400e' },
+    { tag: '[PONIŠTENO]', label: 'Poništeno', bg: '#fee2e2', fg: '#b91c1c' },
+    { tag: '[DOPUNA]', label: 'Dopuna', bg: '#dbeafe', fg: '#1e40af' },
+  ];
+  let tekst = napomena;
+  let oznake = '';
+  for (const m of markeri) {
+    if (tekst.includes(m.tag)) {
+      oznake += `<span style="display:inline-block;font-size:9px;padding:2px 8px;border-radius:10px;background:${m.bg};color:${m.fg};margin-right:6px;font-weight:700">${escHtml(m.label)}</span>`;
+      tekst = tekst.split(m.tag).join('').trim();
+    }
+  }
+  const tekstHtml = tekst ? `<div style="margin-top:6px">${escHtml(tekst)}</div>` : '';
+  return `<strong>Napomena:</strong> ${oznake}${tekstHtml}`;
 }
 
 function getCijenaByDrzava(artikl, drzava) {
@@ -1260,26 +1280,34 @@ async function viewNarudzba(narudzbaId) {
     stavkeHtml = '<div class="text-muted text-center" style="padding:20px">Nema stavki u narudžbi.</div>';
   } else {
     stavkeHtml = `<table><thead><tr>
-      <th>Artikl</th><th>Šifra</th><th>Kol.</th><th>Cijena</th><th>Ukupno</th>
+      <th>Artikl</th><th>Šifra</th><th class="text-center">Kol.</th><th class="text-right">Cijena</th><th class="text-right">Ukupno</th>
     </tr></thead><tbody>`;
     for (const s of stavke) {
       const sTotal = (parseFloat(s.kolicina||0) * parseFloat(s.cijena||0)).toFixed(2);
-    const isDopuna = s.extra_naziv?.startsWith('[DOPUNA]');
-    const isExtra = !s.artikl_id;
-    const displayNaziv = s.extra_naziv ? s.extra_naziv.replace('[DOPUNA] ', '') : (s.artikli?.naziv || '—');
-    const sifraDisplay = s.artikl_id ? escHtml(s.artikli?.sifra || '') : (isDopuna ? '<span style="font-size:9px;padding:2px 6px;border-radius:10px;background:#dbeafe;color:#1e40af">DOPUNA</span>' : '<span style="font-size:9px;padding:2px 6px;border-radius:10px;background:#e5e7eb;color:#6b7280">EXTRA</span>');
-    const rowStyle = isDopuna ? 'background:#f0f7ff' : '';
-    stavkeHtml += `<tr style="${rowStyle}">
-        <td>${escHtml(displayNaziv)}</td>
-        <td class="text-center">${sifraDisplay}</td>
-        <td class="text-center">${s.kolicina}</td>
-        <td class="text-right">${parseFloat(s.cijena||0).toFixed(2)} ${cur}</td>
-        <td class="text-right fw-bold">${sTotal} ${cur}</td>
+      // is_dopuna se sada čita iz baze (pokriva i artikle s liste, ne samo [DOPUNA] prefix)
+      const isDopuna = s.is_dopuna === true || s.extra_naziv?.startsWith('[DOPUNA]');
+      const isExtra = !s.artikl_id;
+      const iznadMaxa = s.iznad_maxa === true;
+      const displayNaziv = s.extra_naziv ? s.extra_naziv.replace('[DOPUNA] ', '') : (s.artikli?.naziv || '—');
+      const sifra = s.artikl_id ? escHtml(s.artikli?.sifra || '') : (isExtra ? '—' : '');
+      // Oznake: DOPUNA (plava) + IZNAD MAX (crvena)
+      let oznake = '';
+      if (isDopuna) oznake += ' <span style="font-size:8px;padding:2px 6px;border-radius:10px;background:#dbeafe;color:#1e40af;white-space:nowrap">DOPUNA</span>';
+      if (isExtra && !isDopuna) oznake += ' <span style="font-size:8px;padding:2px 6px;border-radius:10px;background:#e5e7eb;color:#6b7280;white-space:nowrap">EXTRA</span>';
+      if (iznadMaxa) oznake += ' <span style="font-size:8px;padding:2px 6px;border-radius:10px;background:#fee2e2;color:#b91c1c;white-space:nowrap">IZNAD MAX</span>';
+      const rowStyle = iznadMaxa ? 'background:#fff5f5' : (isDopuna ? 'background:#f0f7ff' : '');
+      const kolStyle = iznadMaxa ? 'color:#b91c1c;font-weight:700' : '';
+      stavkeHtml += `<tr style="${rowStyle}">
+        <td>${escHtml(displayNaziv)}${oznake}</td>
+        <td class="text-center">${sifra}</td>
+        <td class="text-center" style="${kolStyle}">${s.kolicina}</td>
+        <td class="text-right" style="white-space:nowrap">${parseFloat(s.cijena||0).toFixed(2)} ${cur}</td>
+        <td class="text-right fw-bold" style="white-space:nowrap">${sTotal} ${cur}</td>
       </tr>`;
     }
     stavkeHtml += `<tr>
       <td colspan="4" class="fw-bold text-right">UKUPNO:</td>
-      <td class="fw-bold text-right" style="color:var(--jb)">${parseFloat(n.ukupni_iznos||0).toFixed(2)} ${cur}</td>
+      <td class="fw-bold text-right" style="color:var(--jb);white-space:nowrap">${parseFloat(n.ukupni_iznos||0).toFixed(2)} ${cur}</td>
     </tr></tbody></table>`;
   }
 
@@ -1293,7 +1321,7 @@ async function viewNarudzba(narudzbaId) {
         ${getStatusBadge(n.status)}
         <div class="text-muted mt-8">${n.datum_predavanja ? 'Predano: ' + fmtDate(n.datum_predavanja) : ''}</div></div>
     </div>
-    ${n.napomena ? `<div class="alert alert-info" style="margin-bottom:12px"><strong>Napomena:</strong> ${escHtml(n.napomena)}</div>` : ''}
+    ${n.napomena ? `<div class="alert alert-info" style="margin-bottom:12px">${formatNapomena(n.napomena)}</div>` : ''}
     <div class="card-title" style="margin-bottom:10px">Stavke narudžbe</div>
     ${stavkeHtml}`;
 
@@ -1916,8 +1944,11 @@ async function loadStoreDashboard() {
   // Countdown
   renderCountdown();
   
-  // Provjeri ima li vraćenu narudžbu
-  if (activePeriod) {
+  // Provjeri ima li vraćenu narudžbu — banner se UVIJEK iznova renderira
+  // (prazni se ako narudžba više nije vraćena, npr. nakon ponovne predaje)
+  const bannerEl = $('vracenaBanner');
+  if (bannerEl) bannerEl.innerHTML = '';
+  if (activePeriod && bannerEl) {
     const { data: vracena } = await sb.from('narudzbe')
       .select('napomena, status')
       .eq('trgovina_id', userTrgovina.id)
@@ -1928,14 +1959,14 @@ async function loadStoreDashboard() {
     
     if (vracena?.napomena?.includes('[VRAĆENO NA DORADU]')) {
       const razlog = vracena.napomena.replace('[VRAĆENO NA DORADU] ', '');
-      $('storeCountdown').insertAdjacentHTML('afterend', `
+      bannerEl.innerHTML = `
         <div class="alert" style="background:#fff3cd;border:2px solid #f59e0b;color:#92400e;margin-bottom:16px;border-radius:8px;padding:16px">
           <div style="font-weight:700;font-size:14px;margin-bottom:6px">⚠️ Narudžba vraćena na doradu!</div>
           <div style="font-size:13px">Administrator je vratio vašu narudžbu. Razlog: <strong>${escHtml(razlog)}</strong></div>
           <div style="margin-top:10px">
             <button class="btn btn-primary btn-sm" onclick="navTo('store-narudzba', document.querySelectorAll('.nav-item')[1])">✏️ Uredi narudžbu</button>
           </div>
-        </div>`);
+        </div>`;
     }
   }
 
@@ -2905,7 +2936,49 @@ async function submitDopuna(narudzbaId) {
     await showAlert('Upozorenje', 'Nema artikala za dodavanje.', 'warning');
     return;
   }
-  
+
+  // ── Provjera maksimuma PRIJE slanja (kumulativno: postojeće + dopuna) ──
+  // Dopuštamo prekoračenje, ali tražimo potvrdu i upozoravamo trgovinu.
+  const artiklStavke = stavke.filter(s => s.artikl_id);
+  if (artiklStavke.length > 0) {
+    const ids = artiklStavke.map(s => s.artikl_id);
+    // Postojeće količine po artiklu u ovoj narudžbi
+    const { data: postojece } = await sb.from('stavke_narudzbe')
+      .select('artikl_id, kolicina').eq('narudzba_id', narudzbaId).in('artikl_id', ids);
+    const postojecaKol = {};
+    for (const p of (postojece || [])) {
+      if (p.artikl_id) postojecaKol[p.artikl_id] = (postojecaKol[p.artikl_id] || 0) + (parseInt(p.kolicina) || 0);
+    }
+    // Max i naziv po artiklu
+    const { data: artInfo } = await sb.from('artikli').select('id, naziv, max_kolicina').in('id', ids);
+    const artMap = {};
+    for (const a of (artInfo || [])) artMap[a.id] = a;
+
+    const prekoracenja = [];
+    const noviZbroj = {};
+    for (const s of artiklStavke) {
+      noviZbroj[s.artikl_id] = (noviZbroj[s.artikl_id] || 0) + s.kolicina;
+    }
+    for (const id of Object.keys(noviZbroj)) {
+      const a = artMap[id];
+      if (a?.max_kolicina) {
+        const ukupno = (postojecaKol[id] || 0) + noviZbroj[id];
+        if (ukupno > a.max_kolicina) {
+          prekoracenja.push(`• ${a.naziv}: ukupno ${ukupno} kom (maksimum ${a.max_kolicina})`);
+        }
+      }
+    }
+
+    if (prekoracenja.length > 0) {
+      const ok = await showConfirm(
+        'Prekoračenje maksimuma',
+        `<div>Sljedeći artikli će prijeći dozvoljeni maksimum:<br><br>${prekoracenja.map(p => escHtml(p)).join('<br>')}<br><br>Narudžba će biti označena i administrator će vidjeti prekoračenje. Želite li svejedno poslati dopunu?</div>`,
+        'Da, pošalji', 'Odustani'
+      );
+      if (!ok) return;
+    }
+  }
+
   const { data: sessionData } = await sb.auth.getSession();
   const accessToken = sessionData?.session?.access_token;
   
@@ -2936,7 +3009,12 @@ async function submitDopuna(narudzbaId) {
       return;
     }
     
-    await showAlert('Dopuna poslana', 'Administrator će vidjeti dodane artikle označene s [DOPUNA].', 'success');
+    // Ako je server označio prekoračenja maksimuma, napomeni to trgovini
+    if (result.upozorenja && result.upozorenja.length > 0) {
+      await showAlert('Dopuna poslana (uz napomenu)', 'Dopuna je poslana. Neki artikli prelaze maksimum i označeni su — administrator ih vidi kao istaknute.', 'warning');
+    } else {
+      await showAlert('Dopuna poslana', 'Administrator će vidjeti dodane artikle označene kao dopunu.', 'success');
+    }
     loadStoreOrder();
   } catch (err) {
     await showAlert('Greška', 'Greška mreže: ' + err.message, 'error');
