@@ -364,6 +364,10 @@ thead th{color:white!important;background:var(--jb)!important;border-bottom:none
           <input type="hidden" id="filterDrzava" value="">
           <input type="hidden" id="filterStatus" value="">
           <input type="hidden" id="searchNarudzbe" value="">
+          <label style="display:flex;align-items:center;gap:6px;margin-left:auto;font-size:12px;color:var(--jm);cursor:pointer;user-select:none">
+            <input type="checkbox" id="prikaziPonistene" onchange="loadAdminNarudzbe()" style="cursor:pointer">
+            Prikaži poništene
+          </label>
         </div>
         <div class="card">
           <div id="narudzbeTable"><div class="loading">Učitavanje...</div></div>
@@ -827,6 +831,12 @@ function getBadgeDrzava(d) {
   return `<span class="badge ${map[d]||''}">${escHtml(d)}</span>`;
 }
 
+function getStatusBadge(status) {
+  if (status === 'predano') return '<span class="badge badge-ok">✓ Predano</span>';
+  if (status === 'poništeno') return '<span class="badge" style="background:#fee2e2;color:#b91c1c;border-radius:20px;padding:4px 10px">✕ Poništeno</span>';
+  return '<span class="badge badge-draft">Nacrt</span>';
+}
+
 function getCijenaByDrzava(artikl, drzava) {
   const map = {HR:'cijena_hr',BA:'cijena_ba',SI:'cijena_si',RS:'cijena_rs'};
   return artikl[map[drzava]] || 0;
@@ -1088,7 +1098,9 @@ async function loadAdminDashboard() {
   let cardsHtml = '';
 
   for (const drzava of drzave) {
-    const dNar = narudzbe?.filter(n => n.trgovine?.drzava === drzava) || [];
+    const dNarSve = narudzbe?.filter(n => n.trgovine?.drzava === drzava) || [];
+    // Poništene ne ulaze u brojače ni sumu
+    const dNar = dNarSve.filter(n => n.status !== 'poništeno');
     const dPred = dNar.filter(n => n.status === 'predano');
     const dUkupno = dNar.reduce((s,n) => s + (parseFloat(n.ukupni_iznos)||0), 0);
     const dTrg = sveTrgovine?.filter(t => t.drzava === drzava).length || 0;
@@ -1121,7 +1133,7 @@ async function loadAdminDashboard() {
 
   // Posljednje narudžbe
   console.log('Dashboard narudzbe:', narudzbe?.length, narudzbe);
-  const recent = (narudzbe || []).sort((a,b) => new Date(b.updated_at||b.created_at||0) - new Date(a.updated_at||a.created_at||0)).slice(0,10);
+  const recent = (narudzbe || []).filter(n => n.status !== 'poništeno').sort((a,b) => new Date(b.updated_at||b.created_at||0) - new Date(a.updated_at||a.created_at||0)).slice(0,10);
   if (!recent.length) {
     $('dashRecentOrders').innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div>Nema narudžbi za ovaj period.</div>';
     return;
@@ -1140,7 +1152,7 @@ async function loadAdminDashboard() {
       <td class="fw-bold">${escHtml(n.trgovine?.naziv||'—')}</td>
       <td>${getBadgeDrzava(n.trgovine?.drzava||'')}</td>
       <td class="fw-bold">${parseFloat(n.ukupni_iznos||0).toFixed(2)} ${cur}</td>
-      <td>${n.status === 'predano' ? '<span class="badge badge-ok">✓ Predano</span>' : '<span class="badge badge-draft">Nacrt</span>'}</td>
+      <td>${getStatusBadge(n.status)}</td>
       <td class="text-muted">${fmtDate(n.updated_at)}</td>
     </tr>`;
   }
@@ -1179,6 +1191,7 @@ async function loadAdminNarudzbe() {
   const drzava = $('filterDrzava').value;
   const status = $('filterStatus').value;
   const search = $('searchNarudzbe').value.toLowerCase();
+  const prikaziPonistene = $('prikaziPonistene')?.checked || false;
 
   let q = sb.from('narudzbe')
     .select('*, trgovine(naziv, drzava, email, minimalni_iznos)')
@@ -1191,6 +1204,8 @@ async function loadAdminNarudzbe() {
   const { data: narudzbe, error } = await q;
 
   let filtered = narudzbe || [];
+  // Sakrij poništene iz glavne liste (ostaju u bazi radi audit traga)
+  if (!prikaziPonistene) filtered = filtered.filter(n => n.status !== 'poništeno');
   if (drzava) filtered = filtered.filter(n => n.trgovine?.drzava === drzava);
   if (search) filtered = filtered.filter(n =>
     n.trgovine?.naziv?.toLowerCase().includes(search) ||
@@ -1219,9 +1234,7 @@ async function loadAdminNarudzbe() {
       <td>${getBadgeDrzava(drzavaKod)}</td>
       <td class="fw-bold" style="color:${minOk ? 'var(--jok)' : 'var(--jwa)'}">${iznos.toFixed(2)} ${cur}</td>
       <td class="text-muted">${min.toFixed(2)} ${cur}</td>
-      <td>${n.status === 'predano'
-        ? '<span class="badge badge-ok">✓ Predano</span>'
-        : '<span class="badge badge-draft">Nacrt</span>'}</td>
+      <td>${getStatusBadge(n.status)}</td>
       <td class="text-muted">${fmtDate(n.updated_at)}</td>
       <td><button class="btn-edit btn" onclick="viewNarudzba(${n.id})">Detalji</button></td>
     </tr>`;
@@ -1277,9 +1290,7 @@ async function viewNarudzba(narudzbaId) {
         <div class="fw-bold">${escHtml(n.trgovine?.naziv||'')}</div>
         <div class="text-muted">${escHtml(n.trgovine?.email||'')}</div></div>
       <div><div class="text-muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Status</div>
-        ${n.status === 'predano'
-          ? '<span class="badge badge-ok">✓ Predano</span>'
-          : '<span class="badge badge-draft">Nacrt</span>'}
+        ${getStatusBadge(n.status)}
         <div class="text-muted mt-8">${n.datum_predavanja ? 'Predano: ' + fmtDate(n.datum_predavanja) : ''}</div></div>
     </div>
     ${n.napomena ? `<div class="alert alert-info" style="margin-bottom:12px"><strong>Napomena:</strong> ${escHtml(n.napomena)}</div>` : ''}
@@ -1804,7 +1815,8 @@ async function exportExcel(drzava) {
     .eq('period_mjesec', activePeriod.mjesec)
     .eq('period_godina', activePeriod.godina);
 
-  const dNar = (narudzbe || []).filter(n => n.trgovine?.drzava === drzava);
+  // Poništene narudžbe ne ulaze u izvještaj
+  const dNar = (narudzbe || []).filter(n => n.trgovine?.drzava === drzava && n.status !== 'poništeno');
 
   const valuta = {HR:'EUR',BA:'KM',SI:'EUR',RS:'RSD'};
   const cur = valuta[drzava] || '';
