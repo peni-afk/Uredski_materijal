@@ -1237,6 +1237,17 @@ async function loadAdminNarudzbe() {
     return;
   }
 
+  // Koje narudžbe imaju stavke iznad maksimuma? (za crveni indikator u listi)
+  const narudzbaIds = filtered.map(n => n.id);
+  const iznadMaxaSet = new Set();
+  if (narudzbaIds.length > 0) {
+    const { data: prekoracene } = await sb.from('stavke_narudzbe')
+      .select('narudzba_id')
+      .in('narudzba_id', narudzbaIds)
+      .eq('iznad_maxa', true);
+    for (const s of (prekoracene || [])) iznadMaxaSet.add(s.narudzba_id);
+  }
+
   const valuta = {HR:'EUR',BA:'KM',SI:'EUR',RS:'RSD'};
   let html = `<table id="tblAdminNarudzbe" class="order-items-table"><thead><tr>
     <th>Poslovnica ${sortHeader(0,"str")}</th><th>Država ${sortHeader(1,"str")}</th><th>Iznos ${sortHeader(2,"num")}</th><th>Min ${sortHeader(3,"num")}</th><th>Status ${sortHeader(4,"str")}</th><th>Ažurirano ${sortHeader(5,"str")}</th><th></th>
@@ -1248,9 +1259,13 @@ async function loadAdminNarudzbe() {
     const iznos = parseFloat(n.ukupni_iznos||0);
     const min = parseFloat(n.trgovine?.minimalni_iznos||0);
     const minOk = iznos >= min;
+    const imaPrekoracenje = iznadMaxaSet.has(n.id);
+    const prekoracenjeOznaka = imaPrekoracenje
+      ? ' <span title="Sadrži artikle iznad dozvoljenog maksimuma" style="font-size:8px;padding:2px 6px;border-radius:10px;background:#fee2e2;color:#b91c1c;white-space:nowrap;font-weight:700">⚠ IZNAD MAX</span>'
+      : '';
 
-    html += `<tr>
-      <td class="fw-bold">${escHtml(n.trgovine?.naziv||'—')}</td>
+    html += `<tr style="${imaPrekoracenje ? 'background:#fff5f5' : ''}">
+      <td class="fw-bold">${escHtml(n.trgovine?.naziv||'—')}${prekoracenjeOznaka}</td>
       <td>${getBadgeDrzava(drzavaKod)}</td>
       <td class="fw-bold" style="color:${minOk ? 'var(--jok)' : 'var(--jwa)'}">${iznos.toFixed(2)} ${cur}</td>
       <td class="text-muted">${min.toFixed(2)} ${cur}</td>
@@ -2315,8 +2330,23 @@ function renderOrderForm(narudzba, artikli) {
 
     <div class="card">
       <div class="card-title">Napomena</div>
-      <textarea id="napomenaField" autocomplete="off" style="width:100%;padding:9px;border:1.5px solid var(--jbr);border-radius:4px;font-family:'Inter','Verdana',sans-serif;font-size:12px;resize:vertical;min-height:60px" 
-        placeholder="Opcionalna napomena za admina...">${escHtml(narudzba.napomena || '')}</textarea>
+      ${(() => {
+        const nap = narudzba.napomena || '';
+        // Ako je narudžba vraćena/poništena, izdvoji adminov razlog kao zasebnu info kutiju
+        let adminInfo = '';
+        let cistaNapomena = nap;
+        const vracenoMatch = nap.match(/\[VRAĆENO NA DORADU\]\s*([^\[]*)/);
+        if (vracenoMatch) {
+          adminInfo = `<div class="alert" style="background:#fff3cd;border:1px solid #f59e0b;color:#92400e;margin-bottom:10px;border-radius:6px;padding:10px;font-size:12px"><strong>⚠️ Razlog vraćanja (od administratora):</strong><br>${escHtml(vracenoMatch[1].trim())}</div>`;
+        }
+        // Ukloni sve interne markere — polje trgovine mora biti čisto/prazno za NOVU poruku
+        cistaNapomena = nap
+          .replace(/\[VRAĆENO NA DORADU\][^\[]*/g, '')
+          .replace(/\[PONIŠTENO\][^\[]*/g, '')
+          .replace(/\[DOPUNA\][^\[]*/g, '')
+          .trim();
+        return `${adminInfo}<textarea id="napomenaField" autocomplete="off" style="width:100%;padding:9px;border:1.5px solid var(--jbr);border-radius:4px;font-family:'Inter','Verdana',sans-serif;font-size:12px;resize:vertical;min-height:60px" placeholder="Ovdje upišite svoju napomenu za administratora...">${escHtml(cistaNapomena)}</textarea>`;
+      })()}
     </div>
 
     <div class="order-total" id="orderTotalBar">
